@@ -7,9 +7,9 @@ export interface UserRoleWithVersion {
 }
 
 export class OrgRepository {
-  constructor(private db: Kysely<Database>) {}
+  constructor(private db: Kysely<Database>) { }
 
-  async createOrganization(name: string, slug: string, ownerId: string) {
+  async createOrganization(name: string, slug: string, ownerId: string): Promise<{ id: string; name: string; slug: string; created_at: Date }> {
     return this.db.transaction().execute(async (trx) => {
       // Create organization
       const org = await trx

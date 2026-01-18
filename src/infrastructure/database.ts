@@ -21,7 +21,8 @@ export function createDatabase(): Kysely<Database> {
 export async function checkDatabaseHealth(db: Kysely<Database>): Promise<boolean> {
   try {
     console.log('Attempting database health check...');
-    const result = await db.selectFrom('pg_stat_database').select('datname').limit(1).execute();
+    // Use a simple query that works with our schema
+    const result = await db.selectFrom('users').select('id').limit(1).execute();
     console.log('Health check result:', result);
     return true;
   } catch (error) {

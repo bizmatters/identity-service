@@ -11,7 +11,7 @@ export interface TokenData {
 }
 
 export class TokenRepository {
-  constructor(private db: Kysely<Database>) {}
+  constructor(private db: Kysely<Database>) { }
 
   async createToken(
     userId: string,
@@ -19,7 +19,7 @@ export class TokenRepository {
     tokenHash: string,
     description: string,
     expiresAt?: Date
-  ) {
+  ): Promise<TokenData> {
     return this.db
       .insertInto('api_tokens')
       .values({

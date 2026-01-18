@@ -1,7 +1,7 @@
-import Redis from 'ioredis';
+import Redis, { RedisOptions } from 'ioredis';
 
 export function createCache(): Redis {
-  const config: any = {
+  const config: RedisOptions = {
     host: process.env['REDIS_HOST'] || 'localhost',
     port: parseInt(process.env['REDIS_PORT'] || '6379', 10),
     maxRetriesPerRequest: 3,
