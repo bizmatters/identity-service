@@ -1,0 +1,53 @@
+service:
+  name: "identity-service"
+  namespace: "platform-identity"
+
+build:
+  dockerfile: "Dockerfile"
+  context: "."
+  tag: "ci-test"
+
+test:
+  timeout: 600
+  parallel: true
+
+deployment:
+  wait_timeout: 300
+  health_endpoint: "/health"
+  liveness_endpoint: "/health"
+
+dependencies:
+  platform:
+    - cnpg-operator
+    - external-secrets
+    - crossplane-providers
+  external: []
+  internal:
+    - redis
+
+env:
+  NODE_ENV: "test"
+  LOG_LEVEL: "debug"
+  SESSION_TTL: "86400"
+  SESSION_ABSOLUTE_TTL: "604800"
+  SESSION_COOKIE_NAME: "__Host-platform_session"
+  JWT_EXPIRATION: "10m"
+  PERMISSION_CACHE_TTL: "60"
+  JWT_CACHE_BUFFER: "60"
+  TOKEN_CACHE_TTL: "60"
+  JWKS_CACHE_TTL: "3600"
+  DB_POOL_MAX: "3"
+  DB_POOL_IDLE_TIMEOUT: "10000"
+  DB_POOL_CONNECTION_TIMEOUT: "5000"
+
+diagnostics:
+  pre_deploy:
+    check_dependencies: true
+    check_platform_apis: true
+  post_deploy:
+    test_health_endpoint: true
+    test_database_connection: false
+    test_service_connectivity: true
+
+platform:
+  branch: "main"
