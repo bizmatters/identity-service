@@ -6,10 +6,10 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies (including dev dependencies for build)
+RUN npm ci
 
-# Copy source code
+# Copy source code and tests
 COPY . .
 
 # Build TypeScript
@@ -20,17 +20,21 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Install dumb-init and postgresql-client for tests
+RUN apk add --no-cache dumb-init postgresql-client
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Copy built application and dependencies
+# Copy built application, dependencies, and test files
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nodejs:nodejs /app/package.json ./
+COPY --from=builder --chown=nodejs:nodejs /app/tests ./tests
+COPY --from=builder --chown=nodejs:nodejs /app/tsconfig.json ./
+COPY --from=builder --chown=nodejs:nodejs /app/vitest.config.ts ./
+COPY --from=builder --chown=nodejs:nodejs /app/vitest.integration.config.ts ./
 
 # Switch to non-root user
 USER nodejs

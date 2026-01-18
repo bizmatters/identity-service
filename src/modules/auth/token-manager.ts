@@ -1,5 +1,5 @@
 import { createHmac, randomBytes } from 'crypto';
-import { TokenRepository, TokenData } from '../token/token-repository.js';
+import { TokenRepository } from '../token/token-repository.js';
 import { TokenCache } from './token-cache.js';
 
 export interface ApiTokenResult {

@@ -18,11 +18,11 @@ deployment:
 
 dependencies:
   platform:
-    - cnpg-operator
-    - external-secrets
-    - crossplane-providers
+    - apis
+    - databases
   external: []
   internal:
+    - postgres
     - redis
 
 env:
