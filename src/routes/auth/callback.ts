@@ -6,6 +6,8 @@ import type { OIDCClient } from '../../modules/oidc/oidc-client.js';
 import type { SessionManager } from '../../modules/auth/session-manager.js';
 import type { UserRepository } from '../../modules/user/user-repository.js';
 import type { OrgRepository } from '../../modules/org/org-repository.js';
+import type { JWTManager } from '../../modules/auth/jwt-manager.js';
+import type { JWTCache } from '../../modules/auth/jwt-cache.js';
 
 const CallbackQuerySchema = Type.Object({
   code: Type.String(),
@@ -38,6 +40,8 @@ export function callbackRoutes(
   sessionManager: SessionManager,
   userRepository: UserRepository,
   orgRepository: OrgRepository,
+  jwtManager: JWTManager,
+  jwtCache: JWTCache,
   cache: Redis,
   config: CallbackRouteConfig
 ): void {
@@ -144,6 +148,15 @@ export function callbackRoutes(
 
       // Create session (this generates a new session ID - P0: Session Fixation prevention)
       const sessionId = await sessionManager.createSession(user.id, defaultOrgId, membership.role);
+
+      // Mint Platform JWT with user claims (sub, org, role, exp)
+      const platformJWT = jwtManager.mintPlatformJWT(user.id, defaultOrgId, membership.role, membership.version);
+      
+      // Cache Platform JWT until near-expiry
+      const jwtExpiration = jwtManager.getExpiration(platformJWT);
+      if (jwtExpiration) {
+        await jwtCache.set(sessionId, defaultOrgId, platformJWT, jwtExpiration);
+      }
 
       // Set secure cookie: __Host-platform_session (P0: Secure Cookie)
       void reply.cookie(config.sessionCookieName, sessionId, {

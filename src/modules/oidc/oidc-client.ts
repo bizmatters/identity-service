@@ -64,7 +64,7 @@ export class OIDCClient {
    * Generate authorization URL with PKCE parameters
    * Requirements: 1.1, 1.2
    */
-  async getAuthorizationUrl(state: string, nonce: string, codeVerifier: string): Promise<string> {
+  async getAuthorizationUrl(state: string, nonce: string, codeVerifier: string, connection?: string): Promise<string> {
     await this.initialize();
 
     if (!this.client) {
@@ -73,14 +73,21 @@ export class OIDCClient {
 
     const codeChallenge = generators.codeChallenge(codeVerifier);
 
-    const authUrl = this.client.authorizationUrl({
+    const authParams: Record<string, string> = {
       scope: 'openid email profile',
       response_type: 'code',
       state,
       nonce,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
-    });
+    };
+
+    // Add connection parameter for seamless provider redirect (Auth0 style)
+    if (connection) {
+      authParams['connection'] = connection;
+    }
+
+    const authUrl = this.client.authorizationUrl(authParams);
 
     return authUrl;
   }

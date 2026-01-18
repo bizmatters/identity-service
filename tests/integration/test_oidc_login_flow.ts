@@ -89,20 +89,31 @@ describe('OIDC Login Flow Integration', () => {
   it('should complete full OIDC login flow with JIT user provisioning', async () => {
     const testData = testHelpers.generateTestData();
 
-    // Step 1: Initiate login
-    const loginResponse = await app.inject({
+    // Step 1: Check login page returns HTML
+    const loginPageResponse = await app.inject({
       method: 'GET',
       url: '/auth/login?redirect_uri=http://localhost:3000/dashboard',
     });
 
-    expect(loginResponse.statusCode).toBe(302);
-    expect(loginResponse.headers.location).toContain(MOCK_OIDC_CONFIG.issuer);
-    expect(loginResponse.headers.location).toContain('response_type=code');
-    expect(loginResponse.headers.location).toContain('code_challenge');
-    expect(loginResponse.headers.location).toContain('code_challenge_method=S256');
+    expect(loginPageResponse.statusCode).toBe(200);
+    expect(loginPageResponse.headers['content-type']).toContain('text/html');
+    expect(loginPageResponse.body).toContain('Continue with Google');
+    expect(loginPageResponse.body).toContain('/auth/login/google');
+
+    // Step 2: Initiate OIDC flow via Google login endpoint
+    const oidcInitResponse = await app.inject({
+      method: 'GET',
+      url: '/auth/login/google?redirect_uri=http://localhost:3000/dashboard',
+    });
+
+    expect(oidcInitResponse.statusCode).toBe(302);
+    expect(oidcInitResponse.headers.location).toContain(MOCK_OIDC_CONFIG.issuer);
+    expect(oidcInitResponse.headers.location).toContain('response_type=code');
+    expect(oidcInitResponse.headers.location).toContain('code_challenge');
+    expect(oidcInitResponse.headers.location).toContain('code_challenge_method=S256');
 
     // Extract state and other parameters from redirect URL
-    const redirectUrl = new URL(loginResponse.headers.location);
+    const redirectUrl = new URL(oidcInitResponse.headers.location);
     const state = redirectUrl.searchParams.get('state');
     const nonce = redirectUrl.searchParams.get('nonce');
     
@@ -118,7 +129,7 @@ describe('OIDC Login Flow Integration', () => {
     expect(oidcState.nonce).toBe(nonce);
     expect(oidcState.redirect_uri).toBe('http://localhost:3000/dashboard');
 
-    // Step 2: Simulate OIDC provider callback
+    // Step 3: Simulate OIDC provider callback
     const callbackResponse = await app.inject({
       method: 'GET',
       url: `/auth/callback?code=mock-auth-code-${Date.now()}&state=${state}`,
@@ -137,7 +148,7 @@ describe('OIDC Login Flow Integration', () => {
 
     const sessionId = sessionCookie!.value;
 
-    // Step 3: Verify session persistence in Dragonfly
+    // Step 4: Verify session persistence in Dragonfly
     const session = await sessionManager.getSession(sessionId);
     expect(session).toBeTruthy();
     expect(session!.user_id).toBeTruthy();
@@ -145,13 +156,13 @@ describe('OIDC Login Flow Integration', () => {
     expect(session!.role).toBe('owner');
     expect(session!.absolute_expiry).toBeGreaterThan(Date.now());
 
-    // Step 4: Verify user JIT provisioning in PostgreSQL
+    // Step 5: Verify user JIT provisioning in PostgreSQL
     const user = await userRepository.findByExternalId('550e8400-e29b-41d4-a716-446655440000');
     expect(user).toBeTruthy();
     expect(user!.email).toBe('test@example.com');
     expect(user!.default_org_id).toBe(session!.org_id);
 
-    // Step 5: Verify organization creation
+    // Step 6: Verify organization creation
     const org = await testDb
       .selectFrom('organizations')
       .selectAll()
@@ -161,13 +172,13 @@ describe('OIDC Login Flow Integration', () => {
     expect(org).toBeTruthy();
     expect(org!.name).toContain('test');
 
-    // Step 6: Verify membership creation
+    // Step 7: Verify membership creation
     const membership = await orgRepository.getUserRole(session!.user_id, session!.org_id);
     expect(membership).toBeTruthy();
     expect(membership!.role).toBe('owner');
     expect(membership!.version).toBe(1);
 
-    // Step 7: Verify OIDC state cleanup
+    // Step 8: Verify OIDC state cleanup
     const cleanedState = await testCache.get(`oidc:state:${state}`);
     expect(cleanedState).toBeNull();
   });
@@ -180,10 +191,10 @@ describe('OIDC Login Flow Integration', () => {
       'Existing Organization'
     );
 
-    // Initiate login
+    // Initiate login via Google endpoint
     const loginResponse = await app.inject({
       method: 'GET',
-      url: '/auth/login',
+      url: '/auth/login/google',
     });
 
     const redirectUrl = new URL(loginResponse.headers.location);
@@ -206,7 +217,7 @@ describe('OIDC Login Flow Integration', () => {
   it('should reject invalid redirect URI', async () => {
     const response = await app.inject({
       method: 'GET',
-      url: '/auth/login?redirect_uri=http://malicious.com/steal',
+      url: '/auth/login/google?redirect_uri=http://malicious.com/steal',
     });
 
     expect(response.statusCode).toBe(400);
