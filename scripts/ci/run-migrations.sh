@@ -22,12 +22,24 @@ main() {
     log_info "Starting database migrations for identity-service..."
     
     # Validate required environment variables
-    if [[ -z "${DATABASE_URL:-}" ]]; then
-        log_error "Required environment variable not set: DATABASE_URL"
-        return 1
-    fi
+    required_vars=("POSTGRES_HOST" "POSTGRES_PORT" "POSTGRES_DB" "POSTGRES_USER" "POSTGRES_PASSWORD")
+    for var in "${required_vars[@]}"; do
+        if [[ -z "${!var:-}" ]]; then
+            log_error "Required environment variable not set: $var"
+            return 1
+        fi
+    done
     
-    log_info "Database connection configured via DATABASE_URL"
+    log_info "Database connection: ${POSTGRES_USER}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+    
+    # Wait for PostgreSQL to be ready
+    log_info "Waiting for PostgreSQL to be ready..."
+    until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER"; do
+        echo "PostgreSQL not ready, waiting..."
+        sleep 2
+    done
+    
+    log_success "PostgreSQL is ready"
     
     # Set migration directory
     MIGRATION_DIR="${MIGRATION_DIR:-/app/migrations}"
@@ -39,9 +51,21 @@ main() {
     
     log_info "Running migrations from: $MIGRATION_DIR"
     
-    # Run Node.js migration script
-    log_info "Executing TypeScript migration runner..."
-    npm run migrate
+    # Run each migration file in order (001, 002, 003, 004)
+    migration_count=0
+    for migration in "$MIGRATION_DIR"/*.sql; do
+        if [[ -f "$migration" ]]; then
+            log_info "Running migration: $(basename "$migration")"
+            PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$migration"
+            migration_count=$((migration_count + 1))
+        fi
+    done
+    
+    if [[ $migration_count -eq 0 ]]; then
+        log_info "No migration files found in $MIGRATION_DIR"
+    else
+        log_success "Applied $migration_count migrations successfully"
+    fi
     
     log_success "Database migrations completed for identity-service"
 }

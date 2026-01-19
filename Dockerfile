@@ -27,11 +27,13 @@ RUN apk add --no-cache dumb-init postgresql-client
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Copy built application, dependencies, and test files
+# Copy built application, dependencies, test files, scripts, and migrations
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nodejs:nodejs /app/package.json ./
 COPY --from=builder --chown=nodejs:nodejs /app/tests ./tests
+COPY --from=builder --chown=nodejs:nodejs /app/scripts ./scripts
+COPY --from=builder --chown=nodejs:nodejs /app/migrations ./migrations
 COPY --from=builder --chown=nodejs:nodejs /app/tsconfig.json ./
 COPY --from=builder --chown=nodejs:nodejs /app/vitest.config.ts ./
 COPY --from=builder --chown=nodejs:nodejs /app/vitest.integration.config.ts ./
