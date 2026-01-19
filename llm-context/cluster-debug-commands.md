@@ -22,7 +22,7 @@ kubectl run integration-test-oidc --image=identity-service:ci-test --rm -i --res
           {"name": "POSTGRES_DB", "value": "identity-service-db"},
           {"name": "REDIS_HOST", "value": "identity-cache.platform-identity.svc.cluster.local"},
           {"name": "REDIS_PORT", "value": "6379"},
-          {"name": "OIDC_ISSUER", "value": "https://ep-late-cherry-afaerbwj.neonauth.us-west-2.aws.neon.tech/neondb/auth"},
+          {"name": "OIDC_ISSUER", "value": "https://ep-late-cherry-afaerbwj.neonauth.c-2.us-west-2.aws.neon.tech/neondb/auth"},
           {"name": "OIDC_CLIENT_ID", "value": "identity-service-dev"},
           {"name": "OIDC_CLIENT_SECRET", "value": "neon-managed-secret"},
           {"name": "JWT_PRIVATE_KEY", "value": "test-private-key"},
@@ -33,6 +33,9 @@ kubectl run integration-test-oidc --image=identity-service:ci-test --rm -i --res
     ]
   }
 }'
+
+kubectl run test-oidc --image=curlimages/curl --rm -i --restart=Never -n platform-identity -- curl -s -I "http://identity-service.platform-identity.svc.cluster.local:3000/auth/login/google?redirect_uri=https://localhost:3000"
+
 
 kubectl port-forward -n platform-identity svc/identity-service 3000:3000 &
 
