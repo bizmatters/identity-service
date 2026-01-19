@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
 import { Kysely, sql } from 'kysely';
+import { createDatabase } from './database.js';
 import { Database } from '../types/database.js';
 
 export async function runMigrations(db: Kysely<Database>): Promise<void> {
@@ -50,4 +51,25 @@ export async function runMigrations(db: Kysely<Database>): Promise<void> {
       console.log(`Completed migration: ${file}`);
     }
   }
+}
+
+// CLI runner
+async function main() {
+  try {
+    console.log('Starting database migrations...');
+    
+    const db = createDatabase();
+    await runMigrations(db);
+    
+    console.log('All migrations completed successfully');
+    process.exit(0);
+  } catch (error) {
+    console.error('Migration failed:', error);
+    process.exit(1);
+  }
+}
+
+// Run if called directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
 }
