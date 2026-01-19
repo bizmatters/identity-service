@@ -2,6 +2,12 @@ kubectl get pods -n platform-identity
 kubectl get pods -n platform-identity
 kubectl logs -n platform-identity deployment/identity-service --tail=20
 
+
+# JWKS AUTH RESPONSE
+curl -s "https://ep-late-cherry-afaerbwj.neonauth.c-2.us-west-2.aws.neon.tech/neondb/auth/.well-known/jwks.json" | head -5
+{"keys":[{"alg":"EdDSA","crv":"Ed25519","x":"DWRL8ChRGxV1Yq_PCtL3
+h6pwj1qCppiOv1cOhPBlqG8","kty":"OKP","kid":"fdaebf28-d281-4d9d-9ba4-0be06049d783"}]}%   
+
 # TESTING
 docker build -t identity-service:ci-test .
 kind load docker-image identity-service:ci-test --name zerotouch-preview
@@ -41,3 +47,4 @@ kubectl port-forward -n platform-identity svc/identity-service 3000:3000 &
 
 curl -s http://localhost:3000/auth/login
 curl -s "http://localhost:3000/auth/login?redirect_uri=https://localhost:3000"
+ 

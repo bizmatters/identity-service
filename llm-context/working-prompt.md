@@ -16,3 +16,5 @@ you now doing local integration testing
 FOcus - bizmatters/.kiro/specs/platform/in-progress/manus-scale/phase0-authentication/00-platform-login/tasks.md - 27. **CHECKPOINT 3: OIDC Authentication Working**
 
 #task-implementation.md 
+
+kubectl delete pods --all -n kagent

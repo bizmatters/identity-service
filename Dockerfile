@@ -20,8 +20,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dumb-init and postgresql-client for tests
-RUN apk add --no-cache dumb-init postgresql-client
+# Install dumb-init, postgresql-client, and bash for scripts
+RUN apk add --no-cache dumb-init postgresql-client bash
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
@@ -37,6 +37,9 @@ COPY --from=builder --chown=nodejs:nodejs /app/migrations ./migrations
 COPY --from=builder --chown=nodejs:nodejs /app/tsconfig.json ./
 COPY --from=builder --chown=nodejs:nodejs /app/vitest.config.ts ./
 COPY --from=builder --chown=nodejs:nodejs /app/vitest.integration.config.ts ./
+
+# Make scripts executable
+RUN chmod +x ./scripts/ci/*.sh
 
 # Switch to non-root user
 USER nodejs
