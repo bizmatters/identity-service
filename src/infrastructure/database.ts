@@ -15,7 +15,7 @@ export function createDatabase(): Kysely<Database> {
     const dbname = process.env['POSTGRES_DB'];
     
     if (host && user && password && dbname) {
-      connectionString = `postgresql://${user}:${password}@${host}:${port}/${dbname}?sslmode=prefer`;
+      connectionString = `postgresql://${user}:${password}@${host}:${port}/${dbname}?sslmode=require`;
     }
   }
   
