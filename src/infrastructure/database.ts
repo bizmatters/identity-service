@@ -3,10 +3,24 @@ import { Pool } from 'pg';
 import { Database } from '../types/database.js';
 
 export function createDatabase(): Kysely<Database> {
-  const connectionString = process.env['DATABASE_URL'];
+  // Check for explicit DATABASE_URL first
+  let connectionString = process.env['DATABASE_URL'];
+  
+  // Build from individual environment variables if DATABASE_URL not provided
+  if (!connectionString) {
+    const host = process.env['POSTGRES_HOST'];
+    const port = process.env['POSTGRES_PORT'] || '5432';
+    const user = process.env['POSTGRES_USER'];
+    const password = process.env['POSTGRES_PASSWORD'];
+    const dbname = process.env['POSTGRES_DB'];
+    
+    if (host && user && password && dbname) {
+      connectionString = `postgresql://${user}:${password}@${host}:${port}/${dbname}?sslmode=prefer`;
+    }
+  }
   
   if (!connectionString) {
-    throw new Error('DATABASE_URL environment variable is required');
+    throw new Error('DATABASE_URL environment variable or POSTGRES_* variables are required');
   }
 
   const poolConfig = {
