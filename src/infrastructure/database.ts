@@ -16,7 +16,10 @@ export function createDatabase(): Kysely<Database> {
     
     if (host && user && password && dbname) {
       connectionString = `postgresql://${user}:${password}@${host}:${port}/${dbname}`;
+      console.log(`Built connection string from env vars: postgresql://${user}:***@${host}:${port}/${dbname}`);
     }
+  } else {
+    console.log(`Using DATABASE_URL: ${connectionString.replace(/:[^:@]*@/, ':***@')}`);
   }
   
   if (!connectionString) {
