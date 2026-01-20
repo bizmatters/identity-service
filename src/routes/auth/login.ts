@@ -1,132 +1,152 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { generators } from 'openid-client';
-import type { Redis } from 'ioredis';
-import type { OIDCClient } from '../../modules/oidc/oidc-client.js';
+import { NeonAuthClient } from '../../modules/auth/neon-auth-client.js';
+import { SessionManager } from '../../modules/auth/session-manager.js';
+import { UserRepository } from '../../modules/user/user-repository.js';
+import { OrgRepository } from '../../modules/org/org-repository.js';
 
 const LoginQuerySchema = Type.Object({
   redirect_uri: Type.Optional(Type.String()),
 });
 
-interface OIDCState {
-  state: string;
-  nonce: string;
-  code_verifier: string;
-  redirect_uri: string;
-}
+type LoginQuery = {
+  redirect_uri?: string;
+};
 
-export interface LoginRouteConfig {
+interface LoginConfig {
   allowedRedirectUris: string[];
   defaultRedirectUri: string;
 }
 
-/**
- * OIDC Login endpoint with Retool-style UI
- * Requirements: 1.1, 1.2, 1.3
- */
 export function loginRoutes(
   fastify: FastifyInstance,
-  oidcClient: OIDCClient,
-  cache: Redis,
-  config: LoginRouteConfig
+  neonAuthClient: NeonAuthClient,
+  sessionManager: SessionManager,
+  userRepository: UserRepository,
+  orgRepository: OrgRepository,
+  config: LoginConfig
 ): void {
-  // Serve HTML login page with "Continue with Google" button
-  fastify.get('/auth/login', {
-    schema: {
-      querystring: LoginQuerySchema,
+  /**
+   * Serve HTML login page with Retool-style UI
+   * Requirements: 1.1, 1.2, 1.3
+   */
+  fastify.get<{ Querystring: LoginQuery }>(
+    '/auth/login',
+    {
+      schema: {
+        querystring: LoginQuerySchema,
+      },
     },
-  }, async (request: FastifyRequest<{ Querystring: typeof LoginQuerySchema.static }>, reply: FastifyReply): Promise<void> => {
-    try {
+    async (request: FastifyRequest<{ Querystring: LoginQuery }>, reply: FastifyReply) => {
       const { redirect_uri } = request.query;
 
-      // Use provided redirect_uri or default
-      const targetRedirectUri = redirect_uri || config.defaultRedirectUri;
-
       // Validate redirect_uri against allowlist (P0: Redirect URI Validation)
-      if (!config.allowedRedirectUris.includes(targetRedirectUri)) {
+      if (redirect_uri && !config.allowedRedirectUris.includes(redirect_uri)) {
         return reply.status(400).send({
-          error: 'Invalid redirect URI',
-          code: 'INVALID_REDIRECT_URI',
-          message: 'The provided redirect_uri is not in the allowed list',
+          error: 'invalid_redirect_uri',
+          message: 'Redirect URI not in allowlist',
         });
       }
 
-      // Generate Retool-style HTML login page
-      const loginPageHtml = generateLoginPageHtml(targetRedirectUri);
-
-      return reply
-        .type('text/html')
-        .send(loginPageHtml);
-    } catch (error) {
-      fastify.log.error(error, 'Login page error');
-
-      return reply.status(500).send({
-        error: 'Login page error',
-        code: 'LOGIN_PAGE_ERROR',
-        message: 'Failed to load login page',
-      });
+      const loginPageHTML = generateLoginPageHTML(redirect_uri);
+      
+      return reply.type('text/html').send(loginPageHTML);
     }
-  });
+  );
 
-  // OIDC initiation endpoint for Google
-  fastify.get('/auth/login/google', {
-    schema: {
-      querystring: LoginQuerySchema,
+  /**
+   * Initiate Google OAuth flow via Neon Auth
+   * Requirements: 1.1, 1.2, 1.4
+   */
+  fastify.get<{ Querystring: LoginQuery }>(
+    '/auth/login/google',
+    {
+      schema: {
+        querystring: LoginQuerySchema,
+      },
     },
-  }, async (request: FastifyRequest<{ Querystring: typeof LoginQuerySchema.static }>, reply: FastifyReply): Promise<void> => {
-    try {
+    async (request: FastifyRequest<{ Querystring: LoginQuery }>, reply: FastifyReply) => {
       const { redirect_uri } = request.query;
 
-      // Use provided redirect_uri or default
-      const targetRedirectUri = redirect_uri || config.defaultRedirectUri;
-
       // Validate redirect_uri against allowlist (P0: Redirect URI Validation)
-      if (!config.allowedRedirectUris.includes(targetRedirectUri)) {
+      if (redirect_uri && !config.allowedRedirectUris.includes(redirect_uri)) {
         return reply.status(400).send({
-          error: 'Invalid redirect URI',
-          code: 'INVALID_REDIRECT_URI',
-          message: 'The provided redirect_uri is not in the allowed list',
+          error: 'invalid_redirect_uri',
+          message: 'Redirect URI not in allowlist',
         });
       }
 
-      // Generate OIDC parameters
-      const state = generators.state();
-      const nonce = generators.nonce();
-      const codeVerifier = generators.codeVerifier();
+      try {
+        const callbackURL = `${process.env['NEON_AUTH_REDIRECT_URI']}${redirect_uri ? `?redirect_uri=${encodeURIComponent(redirect_uri)}` : ''}`;
 
-      // Store OIDC state in Hot_Cache with 10-minute TTL
-      const oidcState: OIDCState = {
-        state,
-        nonce,
-        code_verifier: codeVerifier,
-        redirect_uri: targetRedirectUri,
-      };
+        // Initiate OAuth flow via Neon Auth
+        const authResult = await neonAuthClient.signInWithSocial('google', callbackURL);
 
-      const stateKey = `oidc:state:${state}`;
-      await cache.setex(stateKey, 600, JSON.stringify(oidcState)); // 10 minutes
+        if (authResult.redirect && authResult.url) {
+          // Redirect to Neon Auth OAuth URL
+          return reply.redirect(302, authResult.url);
+        } else if (authResult.session && authResult.user) {
+          // Direct session creation (shouldn't happen with OAuth but handle gracefully)
+          
+          // JIT provision user
+          const user = await userRepository.createUserAtomic(
+            authResult.user.id,
+            authResult.user.email,
+            '' // Will be set after org creation
+          );
 
-      // Generate authorization URL with PKCE and connection parameter for seamless Google redirect
-      const authUrl = await oidcClient.getAuthorizationUrl(state, nonce, codeVerifier, 'google-oauth2');
+          if (!user) {
+            throw new Error('Failed to create user');
+          }
 
-      // Redirect to Platform_IdP authorize endpoint
-      return reply.redirect(authUrl);
-    } catch (error) {
-      fastify.log.error(error, 'Google login initiation error');
+          // Get or create default organization
+          let orgId = user.default_org_id;
+          if (!orgId) {
+            const org = await orgRepository.createOrganization(
+              `${authResult.user.name || authResult.user.email}'s Organization`,
+              `org-${user.id.substring(0, 8)}`,
+              user.id
+            );
+            orgId = org.id;
+          }
 
-      return reply.status(500).send({
-        error: 'Authentication provider error',
-        code: 'OIDC_INIT_FAILED',
-        message: 'Failed to initiate Google authentication',
-      });
+          // Create platform session
+          const sessionId = await sessionManager.createSession(user.id, orgId, 'owner');
+
+          // Set secure cookie
+          reply.setCookie('__Host-platform_session', sessionId, {
+            path: '/',
+            secure: process.env['NODE_ENV'] === 'production',
+            httpOnly: true,
+            sameSite: 'lax',
+            maxAge: 24 * 60 * 60, // 24 hours
+          });
+
+          // Redirect to dashboard or specified redirect_uri
+          const finalRedirectUri = redirect_uri || config.defaultRedirectUri;
+          return reply.redirect(302, finalRedirectUri);
+        } else {
+          throw new Error('Invalid auth result from Neon Auth');
+        }
+      } catch (error) {
+        fastify.log.error({ error }, 'Google OAuth initiation failed');
+        return reply.status(500).send({
+          error: 'oauth_error',
+          message: 'Failed to initiate Google OAuth',
+        });
+      }
     }
-  });
+  );
 }
 
 /**
- * Generate Retool-style HTML login page
+ * Generate Retool-style login page HTML
  */
-function generateLoginPageHtml(redirectUri: string): string {
-  return `<!DOCTYPE html>
+function generateLoginPageHTML(redirectUri?: string): string {
+  const googleOAuthUrl = `/auth/login/google${redirectUri ? `?redirect_uri=${encodeURIComponent(redirectUri)}` : ''}`;
+
+  return `
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -153,15 +173,15 @@ function generateLoginPageHtml(redirectUri: string): string {
             background: white;
             border-radius: 12px;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            padding: 48px 40px;
+            padding: 48px;
             width: 100%;
             max-width: 400px;
             text-align: center;
         }
         
         .logo {
-            width: 48px;
-            height: 48px;
+            width: 64px;
+            height: 64px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border-radius: 12px;
             margin: 0 auto 24px;
@@ -184,52 +204,42 @@ function generateLoginPageHtml(redirectUri: string): string {
             color: #666;
             font-size: 16px;
             margin-bottom: 32px;
-            line-height: 1.5;
         }
         
         .google-button {
             width: 100%;
-            background: #4285f4;
-            color: white;
-            border: none;
+            background: white;
+            border: 2px solid #e1e5e9;
             border-radius: 8px;
             padding: 16px 24px;
             font-size: 16px;
             font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
+            color: #1a1a1a;
+            text-decoration: none;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 12px;
-            text-decoration: none;
+            transition: all 0.2s ease;
+            cursor: pointer;
         }
         
         .google-button:hover {
-            background: #3367d6;
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
             transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(66, 133, 244, 0.3);
-        }
-        
-        .google-button:active {
-            transform: translateY(0);
         }
         
         .google-icon {
             width: 20px;
             height: 20px;
-            background: white;
-            border-radius: 3px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
         }
         
         .footer {
             margin-top: 32px;
             padding-top: 24px;
-            border-top: 1px solid #eee;
-            color: #888;
+            border-top: 1px solid #e1e5e9;
+            color: #666;
             font-size: 14px;
         }
         
@@ -247,17 +257,15 @@ function generateLoginPageHtml(redirectUri: string): string {
     <div class="login-container">
         <div class="logo">P</div>
         <h1>Welcome back</h1>
-        <p class="subtitle">Sign in to your platform account to continue</p>
+        <p class="subtitle">Sign in to your Platform account</p>
         
-        <a href="/auth/login/google?redirect_uri=${encodeURIComponent(redirectUri)}" class="google-button">
-            <div class="google-icon">
-                <svg width="18" height="18" viewBox="0 0 18 18">
-                    <path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/>
-                    <path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2.04a4.8 4.8 0 0 1-2.7.75 4.8 4.8 0 0 1-4.52-3.36H1.83v2.07A8 8 0 0 0 8.98 17z"/>
-                    <path fill="#FBBC05" d="M4.46 10.41a4.8 4.8 0 0 1-.25-1.41c0-.49.09-.97.25-1.41V5.52H1.83a8 8 0 0 0 0 7.17l2.63-2.28z"/>
-                    <path fill="#EA4335" d="M8.98 3.58c1.32 0 2.5.45 3.44 1.35l2.54-2.54A8 8 0 0 0 8.98 1a8 8 0 0 0-7.15 4.42l2.63 2.28c.63-1.9 2.4-3.12 4.52-3.12z"/>
-                </svg>
-            </div>
+        <a href="${googleOAuthUrl}" class="google-button">
+            <svg class="google-icon" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
             Continue with Google
         </a>
         
@@ -268,22 +276,6 @@ function generateLoginPageHtml(redirectUri: string): string {
         </div>
     </div>
 </body>
-</html>`;
-}
-
-/**
- * Validate redirect URI against allowlist
- */
-export function validateRedirectUri(redirectUri: string, allowedUris: string[]): boolean {
-  return allowedUris.includes(redirectUri);
-}
-
-/**
- * Parse allowed redirect URIs from environment variable
- */
-export function parseAllowedRedirectUris(allowedUrisString: string): string[] {
-  return allowedUrisString
-    .split(',')
-    .map(uri => uri.trim())
-    .filter(uri => uri.length > 0);
+</html>
+  `.trim();
 }

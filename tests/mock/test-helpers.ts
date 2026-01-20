@@ -1,176 +1,126 @@
 import { Kysely } from 'kysely';
-import { Database } from '../../src/types/database.js';
-import type { Redis } from 'ioredis';
+import { Redis } from 'ioredis';
+import { Database } from '../../types/database.js';
 
-export interface TestUser {
-  id: string;
-  external_id: string;
-  email: string;
-  default_org_id: string;
-}
-
-export interface TestOrganization {
-  id: string;
-  name: string;
-  slug: string;
-}
-
-export interface TestMembership {
-  user_id: string;
-  org_id: string;
-  role: 'owner' | 'admin' | 'developer' | 'viewer';
-  version: number;
-}
-
-/**
- * Test helpers for integration tests
- */
 export class TestHelpers {
-  constructor(
-    private db: Kysely<Database>,
-    private cache: Redis
-  ) {}
-
   /**
-   * Clean database tables for test isolation
+   * Clean database state for tests
    */
-  async cleanDatabase(): Promise<void> {
-    await this.db.deleteFrom('memberships').execute();
-    await this.db.deleteFrom('api_tokens').execute();
-    await this.db.deleteFrom('users').execute();
-    await this.db.deleteFrom('organizations').execute();
+  static async cleanDatabase(db: Kysely<Database>): Promise<void> {
+    // Delete in reverse dependency order
+    await db.deleteFrom('memberships').execute();
+    await db.deleteFrom('api_tokens').execute();
+    await db.deleteFrom('users').execute();
+    await db.deleteFrom('organizations').execute();
   }
 
   /**
-   * Clean cache for test isolation
+   * Clean cache state for tests
    */
-  async cleanCache(): Promise<void> {
-    await this.cache.flushall();
+  static async cleanCache(cache: Redis): Promise<void> {
+    await cache.flushall();
   }
 
   /**
-   * Create test user with organization
+   * Create test user data
    */
-  async createTestUser(
-    externalId: string = 'test-external-id',
-    email: string = 'test@example.com',
-    orgName: string = 'Test Organization'
-  ): Promise<{ user: TestUser; organization: TestOrganization; membership: TestMembership }> {
+  static async createTestUser(db: Kysely<Database>): Promise<{
+    user: { id: string; external_id: string; email: string };
+    organization: { id: string; name: string; slug: string };
+  }> {
     // Create organization
-    const organization = await this.db
+    const organization = await db
       .insertInto('organizations')
       .values({
-        name: orgName,
-        slug: `test-org-${Date.now()}`,
+        name: 'Test Organization',
+        slug: 'test-org',
       })
       .returningAll()
       .executeTakeFirstOrThrow();
 
     // Create user
-    const user = await this.db
+    const user = await db
       .insertInto('users')
       .values({
-        external_id: externalId,
-        email,
+        external_id: 'test-user-456',
+        email: 'test@example.com',
         default_org_id: organization.id,
       })
       .returningAll()
       .executeTakeFirstOrThrow();
 
     // Create membership
-    const membership = await this.db
+    await db
       .insertInto('memberships')
       .values({
         user_id: user.id,
         org_id: organization.id,
         role: 'owner',
+        version: 1,
       })
-      .returningAll()
-      .executeTakeFirstOrThrow();
+      .execute();
+
+    return { user, organization };
+  }
+
+  /**
+   * Generate test JWT keys for testing
+   */
+  static getTestJWTKeys(): {
+    privateKey: string;
+    publicKey: string;
+    keyId: string;
+  } {
+    // These are test keys - DO NOT use in production
+    const privateKey = `-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAKCAQEA4f5wg5l2hKsTeNem/V41fGnJm6gOdrj8ym3rFkEjWT2btf02
+uSQkyHpcUiHbp/X5yNicxKtA1uqBdAaUOh9fQbuOphN8AM6o4ePnxj9QFLkn6T95
+IRXMn/dF25XylcuUbL1RTQHpaabxrVwjnuTHxS8h5Ke6+jH4dDPVgIN3YlPB6zDT
+5j9/dGeTf/pY8CB/xNu/5OiWQdJQdxhcyoOoABNnv4FN+2hqaPdwc0NvQoaq30cI
+Nhw2HePiHEHhaLnlteO9Z5djFuLxeQvnm5L2ws/U5YP0jKHCFHyPnVHlmAh6QsFf
+xz9fkuXn5fCXBYKg+qK9lycTMJ4qQTMhRa57VQIDAQABAoIBAECvfqMnC1WiiyBb
++H4HpJ2N1B8+zFnuBiHyPPul8OwdOWLjyMJmSJXR0L/T+2xIyU2ZgJRG0oxIU6FV
+ufgGiHiSWpY8YufMpw1a1nECMsxTVCLOoalLlBcHVYzieHnBahZAXebECAjHHuCO
+TtZFfEApgcq+lxpFkuv7iYKHBtaKlBkTFvgHpgP6aM4fQEKKjJ+oxdqJ4JXxqZxI
+/+lM5rzbFb8MvMW/sK4KQYEH/+jsHqBb6T9YQ1hoUleEeL3sEVwrri2pyJ3p0L/+
+nFx+4Q3/Sl9jBH6PqHGGux5AAAVH2/mxh2+Qk4ckHGjkDlvVmOmcK9+7O8AC8JLy
+vEOKxAECgYEA+8LunaUb4OVZ
+-----END RSA PRIVATE KEY-----`;
+
+    const publicKey = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4f5wg5l2hKsTeNem/V41
+fGnJm6gOdrj8ym3rFkEjWT2btf02uSQkyHpcUiHbp/X5yNicxKtA1uqBdAaUOh9f
+QbuOphN8AM6o4ePnxj9QFLkn6T95IRXMn/dF25XylcuUbL1RTQHpaabxrVwjnuTH
+xS8h5Ke6+jH4dDPVgIN3YlPB6zDT5j9/dGeTf/pY8CB/xNu/5OiWQdJQdxhcyoOo
+ABNnv4FN+2hqaPdwc0NvQoaq30cINhw2HePiHEHhaLnlteO9Z5djFuLxeQvnm5L2
+ws/U5YP0jKHCFHyPnVHlmAh6QsFfxz9fkuXn5fCXBYKg+qK9lycTMJ4qQTMhRa57
+VQIDAQAB
+-----END PUBLIC KEY-----`;
 
     return {
-      user: user as TestUser,
-      organization: organization as TestOrganization,
-      membership: membership as TestMembership,
+      privateKey,
+      publicKey,
+      keyId: 'test-key-1',
     };
   }
 
   /**
-   * Create test session in cache
+   * Wait for a condition to be true
    */
-  async createTestSession(
-    sessionId: string,
-    userId: string,
-    orgId: string,
-    role: string = 'owner'
+  static async waitFor(
+    condition: () => Promise<boolean>,
+    timeout = 5000,
+    interval = 100
   ): Promise<void> {
-    const sessionData = {
-      user_id: userId,
-      org_id: orgId,
-      role,
-      created_at: Date.now(),
-      last_accessed: Date.now(),
-      absolute_expiry: Date.now() + (7 * 24 * 60 * 60 * 1000), // 7 days
-    };
-
-    await this.cache.setex(
-      `session:${sessionId}`,
-      24 * 60 * 60, // 24 hours
-      JSON.stringify(sessionData)
-    );
-  }
-
-  /**
-   * Get session from cache
-   */
-  async getTestSession(sessionId: string): Promise<any | null> {
-    const sessionData = await this.cache.get(`session:${sessionId}`);
-    return sessionData ? JSON.parse(sessionData) : null;
-  }
-
-  /**
-   * Create OIDC state in cache
-   */
-  async createOIDCState(
-    state: string,
-    nonce: string,
-    codeVerifier: string,
-    redirectUri: string
-  ): Promise<void> {
-    const oidcState = {
-      state,
-      nonce,
-      code_verifier: codeVerifier,
-      redirect_uri: redirectUri,
-    };
-
-    await this.cache.setex(
-      `oidc:state:${state}`,
-      600, // 10 minutes
-      JSON.stringify(oidcState)
-    );
-  }
-
-  /**
-   * Wait for async operations to complete
-   */
-  async waitFor(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Generate random test data
-   */
-  generateTestData() {
-    const timestamp = Date.now();
-    return {
-      externalId: `test-external-${timestamp}`,
-      email: `test-${timestamp}@example.com`,
-      orgName: `Test Org ${timestamp}`,
-      sessionId: `test-session-${timestamp}`,
-      state: `test-state-${timestamp}`,
-      nonce: `test-nonce-${timestamp}`,
-      codeVerifier: `test-code-verifier-${timestamp}`,
-    };
+    const start = Date.now();
+    
+    while (Date.now() - start < timeout) {
+      if (await condition()) {
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, interval));
+    }
+    
+    throw new Error(`Condition not met within ${timeout}ms`);
   }
 }

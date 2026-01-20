@@ -5,6 +5,7 @@ export function createCache(): Redis {
   const host = process.env['REDIS_HOST'] || process.env['DRAGONFLY_HOST'] || 'localhost';
   const port = parseInt(process.env['REDIS_PORT'] || process.env['DRAGONFLY_PORT'] || '6379', 10);
   const password = process.env['REDIS_PASSWORD'] || process.env['DRAGONFLY_PASSWORD'];
+  const username = process.env['REDIS_USERNAME'] || process.env['DRAGONFLY_USERNAME'];
 
   const config: RedisOptions = {
     host,
@@ -15,6 +16,10 @@ export function createCache(): Redis {
 
   if (password) {
     config.password = password;
+  }
+
+  if (username) {
+    config.username = username;
   }
 
   const redis = new Redis(config);

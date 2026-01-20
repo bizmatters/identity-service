@@ -1,14 +1,19 @@
+## REDIS Cache
+REDIS is running inside the cluster. for your testing outside cluster use - 
+use this Public endpoint in .env for local testing - redis-10486.crce276.ap-south-1-3.ec2.cloud.redislabs.com:10486
+it can use localhost when testing in k8 cluster as redis is already running in cluster.
+
+## POSTGRES Database
 kubectl get pods -n platform-identity
 kubectl get pods -n platform-identity
 kubectl logs -n platform-identity deployment/identity-service --tail=20
 
-
-# JWKS AUTH RESPONSE
+## JWKS AUTH RESPONSE
 curl -s "https://ep-late-cherry-afaerbwj.neonauth.c-2.us-west-2.aws.neon.tech/neondb/auth/.well-known/jwks.json" | head -5
 {"keys":[{"alg":"EdDSA","crv":"Ed25519","x":"DWRL8ChRGxV1Yq_PCtL3
 h6pwj1qCppiOv1cOhPBlqG8","kty":"OKP","kid":"fdaebf28-d281-4d9d-9ba4-0be06049d783"}]}%   
 
-# TESTING
+## TESTING
 docker build -t identity-service:ci-test .
 kind load docker-image identity-service:ci-test --name zerotouch-preview
 
@@ -19,26 +24,20 @@ kubectl run integration-test-oidc --image=identity-service:ci-test --rm -i --res
       {
         "name": "integration-test-oidc",
         "image": "identity-service:ci-test",
-        "command": ["npm", "run", "test:integration", "--", "tests/integration/test_oidc_login_flow.ts"],
+        "command": ["npm", "run", "test:integration", "--", "tests/integration/test_neon_auth_login_flow.ts"],
         "env": [
-          {"name": "POSTGRES_HOST", "value": "identity-service-db-rw.platform-identity.svc.cluster.local"},
-          {"name": "POSTGRES_PORT", "value": "5432"},
-          {"name": "POSTGRES_USER", "value": "identity-service-db"},
-          {"name": "POSTGRES_PASSWORD", "value": "test-password"},
-          {"name": "POSTGRES_DB", "value": "identity-service-db"},
-          {"name": "REDIS_HOST", "value": "identity-cache.platform-identity.svc.cluster.local"},
+          {"name": "DATABASE_URL", "value": "postgresql://neondb_owner:npg_lhaL8SJCzD9v@ep-flat-feather-aekziod9-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"},
+          {"name": "NEON_AUTH_URL", "value": "https://ep-flat-feather-aekziod9.neonauth.c-2.us-east-2.aws.neon.tech/neondb/auth"},
+          {"name": "NEON_JWKS_URL", "value": "https://ep-flat-feather-aekziod9.neonauth.c-2.us-east-2.aws.neon.tech/neondb/auth/.well-known/jwks.json"},
+          {"name": "REDIS_HOST", "value": "localhost"},
           {"name": "REDIS_PORT", "value": "6379"},
-          {"name": "OIDC_ISSUER", "value": "https://ep-late-cherry-afaerbwj.neonauth.c-2.us-west-2.aws.neon.tech/neondb/auth"},
-          {"name": "OIDC_CLIENT_ID", "value": "identity-service-dev"},
-          {"name": "OIDC_CLIENT_SECRET", "value": "neon-managed-secret"},
-          {"name": "JWT_PRIVATE_KEY", "value": "test-private-key"},
-          {"name": "JWT_PUBLIC_KEY", "value": "test-public-key"},
-          {"name": "JWT_KEY_ID", "value": "test-key-id"}
+          {"name": "NODE_ENV", "value": "test"}
         ]
       }
     ]
   }
 }'
+
 
 kubectl run test-oidc --image=curlimages/curl --rm -i --restart=Never -n platform-identity -- curl -s -I "http://identity-service.platform-identity.svc.cluster.local:3000/auth/login/google?redirect_uri=https://localhost:3000"
 

@@ -1,195 +1,251 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import '@fastify/cookie';
 import { Type } from '@sinclair/typebox';
-import type { Redis } from 'ioredis';
-import type { OIDCClient } from '../../modules/oidc/oidc-client.js';
-import type { SessionManager } from '../../modules/auth/session-manager.js';
-import type { UserRepository } from '../../modules/user/user-repository.js';
-import type { OrgRepository } from '../../modules/org/org-repository.js';
-import type { JWTManager } from '../../modules/auth/jwt-manager.js';
-import type { JWTCache } from '../../modules/auth/jwt-cache.js';
+import { NeonAuthService } from '../../services/neon-auth.service.js';
+import { SessionManager } from '../../modules/auth/session-manager.js';
+import { JWTManager } from '../../modules/auth/jwt-manager.js';
+import { JWTCache } from '../../modules/auth/jwt-cache.js';
 
 const CallbackQuerySchema = Type.Object({
-  code: Type.String(),
-  state: Type.String(),
+  code: Type.Optional(Type.String()),
+  state: Type.Optional(Type.String()),
   error: Type.Optional(Type.String()),
   error_description: Type.Optional(Type.String()),
+  sessionVerifier: Type.Optional(Type.String()),
+  redirect_uri: Type.Optional(Type.String()),
 });
 
-interface OIDCState {
-  state: string;
-  nonce: string;
-  code_verifier: string;
-  redirect_uri: string;
-}
+type CallbackQuery = {
+  code?: string;
+  state?: string;
+  error?: string;
+  error_description?: string;
+  sessionVerifier?: string;
+  redirect_uri?: string;
+};
 
-export interface CallbackRouteConfig {
-  sessionCookieName: string;
+interface CallbackConfig {
+  allowedRedirectUris: string[];
+  defaultRedirectUri: string;
   cookieDomain: string;
   cookieSecure: boolean;
-  dashboardUrl: string;
+}
+
+export function callbackRoutes(
+  fastify: FastifyInstance,
+  neonAuthService: NeonAuthService,
+  sessionManager: SessionManager,
+  jwtManager: JWTManager,
+  jwtCache: JWTCache,
+  config: CallbackConfig
+): void {
+  /**
+   * Handle Neon Auth OAuth callback and create platform session
+   * Requirements: 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 1.11, 1.12, 3.5, 3.6, 8.1
+   */
+  fastify.get<{ Querystring: CallbackQuery }>(
+    '/auth/callback',
+    {
+      schema: {
+        querystring: CallbackQuerySchema,
+      },
+    },
+    async (request: FastifyRequest<{ Querystring: CallbackQuery }>, reply: FastifyReply) => {
+      const { code, state, error, error_description, sessionVerifier, redirect_uri } = request.query;
+
+      try {
+        // Check for OAuth errors
+        if (error) {
+          fastify.log.error({ error, error_description }, 'OAuth callback error');
+          return reply.status(400).send({
+            error: 'oauth_error',
+            message: error_description || error,
+          });
+        }
+
+        // Validate redirect_uri if provided
+        if (redirect_uri && !config.allowedRedirectUris.includes(redirect_uri)) {
+          return reply.status(400).send({
+            error: 'invalid_redirect_uri',
+            message: 'Redirect URI not in allowlist',
+          });
+        }
+
+        // Handle Neon Auth callback
+        const platformContext = await neonAuthService.handleCallback({
+          ...(code && { code }),
+          ...(state && { state }),
+          ...(error && { error }),
+          ...(error_description && { error_description }),
+          ...(sessionVerifier && { sessionVerifier }),
+        });
+
+        // Create Platform session (P0: Session Fixation - always generate new session)
+        const sessionId = await sessionManager.createSession(
+          platformContext.userId,
+          platformContext.orgId,
+          platformContext.role
+        );
+
+        // Mint Platform JWT with user claims
+        const platformJWT = jwtManager.mintPlatformJWT(
+          platformContext.userId,
+          platformContext.orgId,
+          platformContext.role,
+          platformContext.version
+        );
+
+        // Cache Platform JWT until near-expiry (P2: JWT Cache)
+        const jwtPayload = jwtManager.verifyPlatformJWT(platformJWT);
+        await jwtCache.set(sessionId, platformContext.orgId, platformJWT, jwtPayload.exp);
+
+        // Set secure cookie with __Host- prefix (P0: Secure Cookie)
+        const cookieOptions = {
+          path: '/',
+          secure: config.cookieSecure,
+          httpOnly: true,
+          sameSite: 'lax' as const,
+          maxAge: 24 * 60 * 60, // 24 hours
+        };
+
+        // __Host- prefix requires no domain
+        reply.setCookie('__Host-platform_session', sessionId, cookieOptions);
+
+        // Log successful authentication for audit
+        fastify.log.info({
+          userId: platformContext.userId,
+          orgId: platformContext.orgId,
+          role: platformContext.role,
+          sessionId,
+          ip: request.ip,
+        }, 'User authenticated successfully');
+
+        // Redirect to dashboard or specified redirect_uri
+        const finalRedirectUri = redirect_uri || config.defaultRedirectUri;
+        return reply.redirect(302, finalRedirectUri);
+
+      } catch (error) {
+        fastify.log.error({ error, query: request.query }, 'Callback handling failed');
+
+        // Return user-friendly error page
+        const errorPageHTML = generateErrorPageHTML(
+          error instanceof Error ? error.message : 'Authentication failed'
+        );
+        
+        return reply.status(500).type('text/html').send(errorPageHTML);
+      }
+    }
+  );
 }
 
 /**
- * OIDC Callback endpoint
- * Requirements: 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 1.11, 1.12, 3.5, 3.6
+ * Generate error page HTML for authentication failures
  */
-export function callbackRoutes(
-  fastify: FastifyInstance,
-  oidcClient: OIDCClient,
-  sessionManager: SessionManager,
-  userRepository: UserRepository,
-  orgRepository: OrgRepository,
-  jwtManager: JWTManager,
-  jwtCache: JWTCache,
-  cache: Redis,
-  config: CallbackRouteConfig
-): void {
-  fastify.get('/auth/callback', {
-    schema: {
-      querystring: CallbackQuerySchema,
-    },
-  }, async (request: FastifyRequest<{ Querystring: typeof CallbackQuerySchema.static }>, reply: FastifyReply): Promise<void> => {
-    try {
-      const { code, state, error, error_description } = request.query;
-
-      // Check for OIDC errors
-      if (error) {
-        fastify.log.error({ error, error_description }, 'OIDC callback error');
-        return reply.status(400).send({
-          error: 'Authentication failed',
-          code: 'OIDC_ERROR',
-          message: error_description || error,
-        });
-      }
-
-      // Validate state from Hot_Cache
-      const stateKey = `oidc:state:${state}`;
-      const stateData = await cache.get(stateKey);
-
-      if (!stateData) {
-        fastify.log.error({ state }, 'Invalid or expired OIDC state');
-        return reply.status(400).send({
-          error: 'Invalid or expired authentication state',
-          code: 'INVALID_STATE',
-          message: 'Authentication state is invalid or has expired',
-        });
-      }
-
-      const oidcState = JSON.parse(stateData) as OIDCState;
-
-      // Clean up state from cache
-      await cache.del(stateKey);
-
-      // Exchange code for tokens via back-channel
-      const tokenSet = await oidcClient.exchangeCode(code, oidcState.code_verifier);
-
-      if (!tokenSet.id_token) {
-        throw new Error('No ID token received from OIDC provider');
-      }
-
-      // Validate ID token signature
-      const idTokenClaims = await oidcClient.validateIdToken(tokenSet.id_token);
-
-      // Validate nonce
-      if (idTokenClaims.nonce !== oidcState.nonce) {
-        fastify.log.error({
-          expected: oidcState.nonce,
-          received: idTokenClaims.nonce
-        }, 'Nonce mismatch');
-        return reply.status(400).send({
-          error: 'Authentication validation failed',
-          code: 'NONCE_MISMATCH',
-          message: 'Authentication nonce validation failed',
-        });
-      }
-
-      // Extract external_id (sub claim)
-      const externalId = idTokenClaims.sub;
-      const email = idTokenClaims.email;
-
-      // JIT provision user if not exists (atomic INSERT)
-      let user = await userRepository.findByExternalId(externalId);
-      let defaultOrgId: string;
-
-      if (!user) {
-        // Create default organization first
-        const orgName = `${email.split('@')[0]}'s Organization`;
-        const orgSlug = `${email.split('@')[0]}-org-${Date.now()}`;
-
-        // Create user and organization in transaction
-        const result = await userRepository.createUserWithDefaultOrg(externalId, email, orgName, orgSlug);
-        user = result.user;
-        defaultOrgId = result.organization.id;
-
-        fastify.log.info({
-          userId: user.id,
-          externalId,
-          email,
-          orgId: defaultOrgId
-        }, 'JIT provisioned new user');
-      } else {
-        // Update existing user's profile (email sync)
-        await userRepository.updateUserProfile(user.id, { email });
-        defaultOrgId = user.default_org_id!;
-
-        fastify.log.info({
-          userId: user.id,
-          externalId,
-          email
-        }, 'Updated existing user profile');
-      }
-
-      // Get user's role in default organization
-      const membership = await orgRepository.getUserRole(user.id, defaultOrgId);
-      if (!membership) {
-        throw new Error('User has no membership in default organization');
-      }
-
-      // Create session (this generates a new session ID - P0: Session Fixation prevention)
-      const sessionId = await sessionManager.createSession(user.id, defaultOrgId, membership.role);
-
-      // Mint Platform JWT with user claims (sub, org, role, exp)
-      const platformJWT = jwtManager.mintPlatformJWT(user.id, defaultOrgId, membership.role, membership.version);
-      
-      // Cache Platform JWT until near-expiry
-      const jwtExpiration = jwtManager.getExpiration(platformJWT);
-      if (jwtExpiration) {
-        await jwtCache.set(sessionId, defaultOrgId, platformJWT, jwtExpiration);
-      }
-
-      // Set secure cookie: __Host-platform_session (P0: Secure Cookie)
-      void reply.cookie(config.sessionCookieName, sessionId, {
-        httpOnly: true,
-        secure: config.cookieSecure,
-        sameSite: 'lax',
-        path: '/',
-        domain: config.cookieDomain,
-        maxAge: 7 * 24 * 60 * 60, // 7 days
-      });
-
-      // Log successful authentication
-      fastify.log.info({
-        userId: user.id,
-        orgId: defaultOrgId,
-        role: membership.role,
-        sessionId: sessionId.substring(0, 8) + '...', // Log partial session ID
-        ip: request.ip,
-        userAgent: request.headers['user-agent'],
-      }, 'User authenticated successfully');
-
-      // Redirect to dashboard (or original redirect_uri)
-      const redirectUrl = oidcState.redirect_uri || config.dashboardUrl;
-      return reply.redirect(redirectUrl);
-
-    } catch (error) {
-      fastify.log.error(error, 'Callback endpoint error');
-
-      return reply.status(500).send({
-        error: 'Authentication processing failed',
-        code: 'CALLBACK_PROCESSING_FAILED',
-        message: 'Failed to process authentication callback',
-      });
-    }
-  });
+function generateErrorPageHTML(errorMessage: string): string {
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Error</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .error-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 48px;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        
+        .error-icon {
+            width: 64px;
+            height: 64px;
+            background: #ff6b6b;
+            border-radius: 50%;
+            margin: 0 auto 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+        }
+        
+        h1 {
+            color: #1a1a1a;
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        
+        .error-message {
+            color: #666;
+            font-size: 16px;
+            margin-bottom: 32px;
+            line-height: 1.5;
+        }
+        
+        .retry-button {
+            width: 100%;
+            background: #667eea;
+            border: none;
+            border-radius: 8px;
+            padding: 16px 24px;
+            font-size: 16px;
+            font-weight: 500;
+            color: white;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        
+        .retry-button:hover {
+            background: #5a6fd8;
+            transform: translateY(-1px);
+        }
+        
+        .footer {
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid #e1e5e9;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">!</div>
+        <h1>Authentication Failed</h1>
+        <p class="error-message">${errorMessage}</p>
+        
+        <a href="/auth/login" class="retry-button">
+            Try Again
+        </a>
+        
+        <div class="footer">
+            If this problem persists, please contact support.
+        </div>
+    </div>
+</body>
+</html>
+  `.trim();
 }

@@ -1,0 +1,4 @@
+{
+  "redirect": true,
+  "url": "https://accounts.google.com/oauth/authorize?client_id=test&redirect_uri=http://localhost:3000/auth/callback&response_type=code&scope=openid%20email%20profile&state=test-state-123&nonce=test-nonce-456"
+}

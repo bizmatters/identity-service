@@ -1,93 +1,56 @@
-import { beforeAll, afterAll, beforeEach } from 'vitest';
-import { Kysely, PostgresDialect } from 'kysely';
-import { Pool } from 'pg';
-import Redis from 'ioredis';
-import { Database } from '../../src/types/database.js';
+import { beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import { createDatabase } from '../../src/infrastructure/database.js';
+import { createCache } from '../../src/infrastructure/cache.js';
+import { MockNeonAuthProvider } from '../mock/mock-neon-auth-provider.js';
 import { TestHelpers } from '../mock/test-helpers.js';
 
-// Test database and cache instances
-let testDb: Kysely<Database>;
-let testCache: Redis;
-let testHelpers: TestHelpers;
+// Global test fixtures - using REAL infrastructure as per integration testing patterns
+export let db: ReturnType<typeof createDatabase>;
+export let cache: ReturnType<typeof createCache>;
+export let mockNeonAuth: MockNeonAuthProvider;
 
-// Test configuration
-const TEST_CONFIG = {
-  database: {
-    connectionString: process.env.TEST_DATABASE_URL || 'postgresql://postgres:password@localhost:5432/identity_test',
-  },
-  cache: {
-    host: process.env.TEST_REDIS_HOST || 'localhost',
-    port: parseInt(process.env.TEST_REDIS_PORT || '6379'),
-    password: process.env.TEST_REDIS_PASSWORD,
-    db: 1, // Use different DB for tests
-  },
-};
-
-/**
- * Setup test infrastructure
- */
 beforeAll(async () => {
-  // Setup test database
-  const pool = new Pool({
-    connectionString: TEST_CONFIG.database.connectionString,
-    max: 3,
-  });
-
-  testDb = new Kysely<Database>({
-    dialect: new PostgresDialect({ pool }),
-  });
-
-  // Setup test cache
-  testCache = new Redis({
-    host: TEST_CONFIG.cache.host,
-    port: TEST_CONFIG.cache.port,
-    password: TEST_CONFIG.cache.password,
-    db: TEST_CONFIG.cache.db,
-    retryDelayOnFailover: 100,
-    maxRetriesPerRequest: 3,
-  });
-
-  // Setup test helpers
-  testHelpers = new TestHelpers(testDb, testCache);
-
-  // Verify connections
-  try {
-    await testDb.selectFrom('users').select('id').limit(1).execute();
-    console.log('✓ Test database connection established');
-  } catch (error) {
-    console.error('✗ Test database connection failed:', error);
-    throw error;
-  }
-
-  try {
-    await testCache.ping();
-    console.log('✓ Test cache connection established');
-  } catch (error) {
-    console.error('✗ Test cache connection failed:', error);
-    throw error;
-  }
+  // Initialize REAL database connection (internal dependency)
+  // This uses the same createDatabase() function as production
+  // Database URL comes from .env file - real Neon PostgreSQL
+  db = createDatabase();
+  
+  // Initialize REAL cache connection (internal dependency)  
+  // This uses the same createCache() function as production
+  // Redis connection comes from .env file - real Redis
+  cache = createCache();
+  
+  // Start mock Neon Auth provider (external dependency - should be mocked)
+  // Only mock external Neon Auth API, not the Neon database
+  mockNeonAuth = new MockNeonAuthProvider(3001);
+  await mockNeonAuth.start();
+  
+  // Set environment variable to point to mock Neon Auth API (environment variable override pattern)
+  process.env['NEON_AUTH_URL'] = mockNeonAuth.getBaseURL();
 });
 
-/**
- * Clean up before each test
- */
-beforeEach(async () => {
-  await testHelpers.cleanDatabase();
-  await testHelpers.cleanCache();
-});
-
-/**
- * Cleanup test infrastructure
- */
 afterAll(async () => {
-  if (testDb) {
-    await testDb.destroy();
+  // Clean up connections
+  if (cache) {
+    await cache.quit();
   }
   
-  if (testCache) {
-    await testCache.quit();
+  if (mockNeonAuth) {
+    await mockNeonAuth.stop();
   }
+  
+  // Clean up environment
+  delete process.env['NEON_AUTH_URL'];
 });
 
-// Export test instances for use in tests
-export { testDb, testCache, testHelpers, TEST_CONFIG };
+beforeEach(async () => {
+  // Clean state before each test using REAL infrastructure
+  await TestHelpers.cleanDatabase(db);
+  await TestHelpers.cleanCache(cache);
+});
+
+afterEach(async () => {
+  // Clean state after each test using REAL infrastructure
+  await TestHelpers.cleanDatabase(db);
+  await TestHelpers.cleanCache(cache);
+});

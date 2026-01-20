@@ -2,14 +2,17 @@
 import Fastify from 'fastify';
 import { createDatabase } from './infrastructure/database.js';
 import { createCache } from './infrastructure/cache.js';
-import { OIDCClient } from './modules/oidc/oidc-client.js';
+import { NeonAuthClient } from './modules/auth/neon-auth-client.js';
 import { SessionManager } from './modules/auth/session-manager.js';
-import { UserRepository } from './modules/user/user-repository.js';
-import { OrgRepository } from './modules/org/org-repository.js';
 import { JWTManager } from './modules/auth/jwt-manager.js';
 import { JWTCache } from './modules/auth/jwt-cache.js';
+import { UserRepository } from './modules/user/user-repository.js';
+import { OrgRepository } from './modules/org/org-repository.js';
+import { NeonAuthService } from './services/neon-auth.service.js';
 import { loginRoutes } from './routes/auth/login.js';
 import { callbackRoutes } from './routes/auth/callback.js';
+import { logoutRoutes } from './routes/auth/logout.js';
+import { switchOrgRoutes } from './routes/auth/switch-org.js';
 
 const fastify = Fastify({
   logger: true
@@ -23,31 +26,48 @@ const db = createDatabase();
 const cache = createCache();
 
 // Initialize services
-const oidcClient = new OIDCClient({
-  issuer: process.env['OIDC_ISSUER'] || 'https://accounts.google.com',
-  clientId: process.env['OIDC_CLIENT_ID'] || '',
-  clientSecret: process.env['OIDC_CLIENT_SECRET'] || '',
-  redirectUri: process.env['OIDC_REDIRECT_URI'] || 'http://localhost:3000/auth/callback',
-}, cache);
+const neonAuthClient = new NeonAuthClient({
+  baseURL: process.env['NEON_AUTH_URL'] || 'https://ep-late-cherry-afaerbwj.neonauth.c-2.us-west-2.aws.neon.tech/neondb/auth',
+  secret: process.env['NEON_AUTH_SECRET'] || '',
+  redirectUri: process.env['NEON_AUTH_REDIRECT_URI'] || 'http://localhost:3000/auth/callback',
+});
 
 const sessionManager = new SessionManager(cache, {
   sessionTTL: parseInt(process.env['SESSION_TTL'] || '86400'),
   absoluteTTL: parseInt(process.env['SESSION_ABSOLUTE_TTL'] || '604800'),
+  cookieName: process.env['SESSION_COOKIE_NAME'] || '__Host-platform_session',
 });
-
-const userRepository = new UserRepository(db);
-const orgRepository = new OrgRepository(db);
 
 const jwtManager = new JWTManager({
   privateKey: process.env['JWT_PRIVATE_KEY'] || '',
   publicKey: process.env['JWT_PUBLIC_KEY'] || '',
   keyId: process.env['JWT_KEY_ID'] || 'default',
   expiration: process.env['JWT_EXPIRATION'] || '10m',
+  ...(process.env['JWT_PREVIOUS_PRIVATE_KEY'] && {
+    previousPrivateKey: process.env['JWT_PREVIOUS_PRIVATE_KEY'],
+  }),
+  ...(process.env['JWT_PREVIOUS_PUBLIC_KEY'] && {
+    previousPublicKey: process.env['JWT_PREVIOUS_PUBLIC_KEY'],
+  }),
+  ...(process.env['JWT_PREVIOUS_KEY_ID'] && {
+    previousKeyId: process.env['JWT_PREVIOUS_KEY_ID'],
+  }),
 });
 
-const jwtCache = new JWTCache(cache, {
-  bufferSeconds: parseInt(process.env['JWT_CACHE_BUFFER'] || '60'),
-});
+const jwtCache = new JWTCache(cache);
+
+const userRepository = new UserRepository(db);
+const orgRepository = new OrgRepository(db);
+
+const neonAuthService = new NeonAuthService(
+  {
+    baseURL: process.env['NEON_AUTH_URL'] || 'https://ep-late-cherry-afaerbwj.neonauth.c-2.us-west-2.aws.neon.tech/neondb/auth',
+    secret: process.env['NEON_AUTH_SECRET'] || '',
+    redirectUri: process.env['NEON_AUTH_REDIRECT_URI'] || 'http://localhost:3000/auth/callback',
+  },
+  userRepository,
+  orgRepository
+);
 
 // Configuration
 const loginConfig = {
@@ -56,18 +76,29 @@ const loginConfig = {
 };
 
 const callbackConfig = {
-  sessionCookieName: process.env['SESSION_COOKIE_NAME'] || '__Host-platform_session',
-  cookieDomain: process.env['COOKIE_DOMAIN'] || 'localhost',
-  cookieSecure: process.env['COOKIE_SECURE'] === 'true',
-  dashboardUrl: process.env['DASHBOARD_URL'] || 'http://localhost:3000/dashboard',
+  allowedRedirectUris: (process.env['ALLOWED_REDIRECT_URIS'] || 'http://localhost:3000/dashboard').split(','),
+  defaultRedirectUri: process.env['DEFAULT_REDIRECT_URI'] || 'http://localhost:3000/dashboard',
+  cookieDomain: process.env['COOKIE_DOMAIN'] || '',
+  cookieSecure: process.env['NODE_ENV'] === 'production',
+};
+
+const logoutConfig = {
+  cookieName: process.env['SESSION_COOKIE_NAME'] || '__Host-platform_session',
+  cookieSecure: process.env['NODE_ENV'] === 'production',
+};
+
+const switchOrgConfig = {
+  cookieName: process.env['SESSION_COOKIE_NAME'] || '__Host-platform_session',
 };
 
 // Register routes
-loginRoutes(fastify, oidcClient, cache, loginConfig);
-callbackRoutes(fastify, oidcClient, sessionManager, userRepository, orgRepository, jwtManager, jwtCache, cache, callbackConfig);
+loginRoutes(fastify, neonAuthClient, sessionManager, userRepository, orgRepository, loginConfig);
+callbackRoutes(fastify, neonAuthService, sessionManager, jwtManager, jwtCache, callbackConfig);
+logoutRoutes(fastify, sessionManager, jwtCache, neonAuthService, logoutConfig);
+switchOrgRoutes(fastify, sessionManager, jwtCache, orgRepository, switchOrgConfig);
 
 // Health check endpoint
-fastify.get('/health', async () => {
+fastify.get('/health', async (): Promise<{ status: string; service: string }> => {
   try {
     // Test database connection
     await db.selectFrom('users').select('id').limit(1).execute();
@@ -83,12 +114,12 @@ fastify.get('/health', async () => {
 });
 
 // Ready check endpoint  
-fastify.get('/ready', async () => {
+fastify.get('/ready', (): { status: string; service: string } => {
   return { status: 'ready', service: 'identity-service' };
 });
 
 // Basic info endpoint
-fastify.get('/', async () => {
+fastify.get('/', (): { service: string; version: string; status: string } => {
   return { 
     service: 'identity-service',
     version: '1.0.0',
@@ -96,7 +127,7 @@ fastify.get('/', async () => {
   };
 });
 
-const start = async () => {
+const start = async (): Promise<void> => {
   try {
     const PORT = process.env['PORT'] || 3000;
     await fastify.listen({ port: Number(PORT), host: '0.0.0.0' });
@@ -107,4 +138,4 @@ const start = async () => {
   }
 };
 
-start();
+void start();

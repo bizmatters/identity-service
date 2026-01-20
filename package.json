@@ -15,7 +15,6 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:db-layer": "tsx src/test-db-layer.ts",
-    "migrate": "tsx src/infrastructure/migrations.ts",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\""
   },

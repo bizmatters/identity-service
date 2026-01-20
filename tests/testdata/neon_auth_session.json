@@ -1,0 +1,19 @@
+{
+  "session": {
+    "id": "test-session-123",
+    "userId": "test-user-456",
+    "expiresAt": "2024-12-31T23:59:59.000Z",
+    "token": "test-session-token",
+    "ipAddress": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (Test Browser)"
+  },
+  "user": {
+    "id": "test-user-456",
+    "email": "test@example.com",
+    "name": "Test User",
+    "image": "https://example.com/avatar.jpg",
+    "emailVerified": true,
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "updatedAt": "2024-01-01T00:00:00.000Z"
+  }
+}

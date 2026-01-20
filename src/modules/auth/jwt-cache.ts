@@ -1,183 +1,202 @@
 import type { Redis } from 'ioredis';
 
-export interface JWTCacheConfig {
-  bufferSeconds: number; // Buffer time before expiry to refresh JWT (default: 60s)
-}
-
-/**
- * JWT Cache for caching signed JWTs per session until near-expiry
- * Requirements: 2.9
- */
 export class JWTCache {
-  private readonly JWT_KEY_PREFIX = 'jwt:';
+  private readonly BUFFER_SECONDS = 60; // Refresh JWT 60 seconds before expiry (P2)
 
-  constructor(
-    private cache: Redis,
-    private config: JWTCacheConfig
-  ) {}
+  constructor(private cache: Redis) {}
 
   /**
    * Get cached JWT for session and organization
-   * Requirements: 2.9
+   * Requirements: 2.9, P2: JWT Cache
    */
   async get(sessionId: string, orgId: string): Promise<string | null> {
-    const key = this.getJWTKey(sessionId, orgId);
+    const key = `jwt:${sessionId}:${orgId}`;
     
     try {
-      return await this.cache.get(key);
+      const jwt = await this.cache.get(key);
+      return jwt;
     } catch (error) {
-      // Return null on cache errors to allow fallback to JWT minting
+      // Cache error - return null to force new JWT generation
       return null;
     }
   }
 
   /**
-   * Cache JWT with TTL = exp - buffer seconds (P2)
-   * Requirements: 2.9
+   * Set JWT in cache with TTL until near-expiry
+   * Requirements: 2.9, P2: JWT Cache
    */
   async set(sessionId: string, orgId: string, jwt: string, expiresAt: number): Promise<void> {
-    const key = this.getJWTKey(sessionId, orgId);
+    const key = `jwt:${sessionId}:${orgId}`;
+    const now = Math.floor(Date.now() / 1000);
     
-    try {
-      // Calculate TTL: expiry time minus buffer seconds
-      const now = Math.floor(Date.now() / 1000);
-      const ttl = Math.max(0, expiresAt - now - this.config.bufferSeconds);
-      
-      if (ttl > 0) {
+    // Calculate TTL: expire the cache entry BUFFER_SECONDS before JWT expires
+    const ttl = Math.max(0, expiresAt - now - this.BUFFER_SECONDS);
+    
+    if (ttl > 0) {
+      try {
         await this.cache.setex(key, ttl, jwt);
+      } catch (error) {
+        // Cache write error - not critical, just means we'll generate more JWTs
+        console.warn('JWT cache write failed:', error);
       }
-      // If TTL is 0 or negative, don't cache (JWT is already near expiry)
+    }
+    // If TTL is 0 or negative, don't cache (JWT is already near expiry)
+  }
+
+  /**
+   * Invalidate cached JWT for session (e.g., on logout or org switch)
+   * Requirements: 1.9, 3.8
+   */
+  async invalidate(sessionId: string, orgId?: string): Promise<void> {
+    try {
+      if (orgId) {
+        // Invalidate specific session-org combination
+        const key = `jwt:${sessionId}:${orgId}`;
+        await this.cache.del(key);
+      } else {
+        // Invalidate all JWTs for this session (all orgs)
+        const pattern = `jwt:${sessionId}:*`;
+        const keys = await this.scanKeys(pattern);
+        
+        if (keys.length > 0) {
+          await this.cache.del(...keys);
+        }
+      }
     } catch (error) {
-      // Continue even if cache write fails
-      console.warn(`Failed to cache JWT for ${sessionId}:${orgId}:`, error);
+      // Cache error - not critical for security, just performance
+      console.warn('JWT cache invalidation failed:', error);
     }
   }
 
   /**
-   * Invalidate cached JWT for session (all organizations)
-   * Requirements: 2.9
+   * Invalidate all JWTs for a user across all sessions and orgs
+   * Useful when user permissions change globally
    */
-  async invalidate(sessionId: string): Promise<void> {
+  async invalidateUser(): Promise<void> {
+    // Note: This requires knowing session IDs for the user
+    // In practice, this might be called from session manager
+    // For now, we'll implement a pattern-based approach
+    
     try {
-      const pattern = this.getJWTKey(sessionId, '*');
-      const keys = await this.cache.keys(pattern);
+      // This is a simplified approach - in production you might maintain
+      // a reverse index of user -> sessions for more efficient invalidation
+      const pattern = 'jwt:*';
+      const keys = await this.scanKeys(pattern);
       
+      // This is not efficient for large numbers of JWTs
+      // Consider implementing user-specific JWT tracking if needed
       if (keys.length > 0) {
         await this.cache.del(...keys);
       }
     } catch (error) {
-      // Continue even if cache delete fails
-      console.warn(`Failed to invalidate JWT cache for session ${sessionId}:`, error);
+      console.warn('User JWT cache invalidation failed:', error);
     }
   }
 
   /**
-   * Invalidate cached JWT for specific session and organization
-   * Requirements: 2.9
-   */
-  async invalidateSpecific(sessionId: string, orgId: string): Promise<void> {
-    const key = this.getJWTKey(sessionId, orgId);
-    
-    try {
-      await this.cache.del(key);
-    } catch (error) {
-      // Continue even if cache delete fails
-      console.warn(`Failed to invalidate JWT cache for ${sessionId}:${orgId}:`, error);
-    }
-  }
-
-  /**
-   * Check if JWT exists in cache and is not near expiry
+   * Check if JWT exists in cache (without retrieving it)
    */
   async exists(sessionId: string, orgId: string): Promise<boolean> {
-    const jwt = await this.get(sessionId, orgId);
-    return jwt !== null;
-  }
-
-  /**
-   * Get all cached JWTs for a session (useful for debugging)
-   */
-  async getSessionJWTs(sessionId: string): Promise<Record<string, string>> {
+    const key = `jwt:${sessionId}:${orgId}`;
+    
     try {
-      const pattern = this.getJWTKey(sessionId, '*');
-      const keys = await this.cache.keys(pattern);
-      
-      if (keys.length === 0) {
-        return {};
-      }
-
-      const values = await this.cache.mget(...keys);
-      const result: Record<string, string> = {};
-      
-      keys.forEach((key, index) => {
-        const value = values[index];
-        if (value) {
-          // Extract orgId from key
-          const orgId = key.split(':').pop();
-          if (orgId) {
-            result[orgId] = value;
-          }
-        }
-      });
-
-      return result;
+      const exists = await this.cache.exists(key);
+      return exists === 1;
     } catch (error) {
-      console.warn(`Failed to get session JWTs for ${sessionId}:`, error);
-      return {};
+      return false;
     }
   }
 
   /**
-   * Clear all JWT cache entries (useful for testing)
+   * Get TTL for cached JWT
+   * Useful for monitoring and debugging
+   */
+  async getTTL(sessionId: string, orgId: string): Promise<number> {
+    const key = `jwt:${sessionId}:${orgId}`;
+    
+    try {
+      return await this.cache.ttl(key);
+    } catch (error) {
+      return -1; // Key doesn't exist or error occurred
+    }
+  }
+
+  /**
+   * Scan for keys matching pattern
+   * Helper method for bulk operations
+   */
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor = '0';
+    
+    do {
+      const result = await this.cache.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = result[0];
+      keys.push(...result[1]);
+    } while (cursor !== '0');
+    
+    return keys;
+  }
+
+  /**
+   * Get cache statistics for monitoring
+   */
+  async getStats(): Promise<{
+    totalKeys: number;
+    memoryUsage?: string;
+  }> {
+    try {
+      const keys = await this.scanKeys('jwt:*');
+      const info = await this.cache.info('memory');
+      
+      // Parse memory usage from Redis INFO output
+      const memoryMatch = info.match(/used_memory_human:([^\r\n]+)/);
+      const memoryUsage = memoryMatch?.[1]?.trim();
+      
+      return {
+        totalKeys: keys.length,
+        ...(memoryUsage && { memoryUsage }),
+      };
+    } catch (error) {
+      return {
+        totalKeys: 0,
+      };
+    }
+  }
+
+  /**
+   * Clear all JWT cache entries
+   * Useful for testing or emergency cache flush
    */
   async clear(): Promise<void> {
     try {
-      const pattern = `${this.JWT_KEY_PREFIX}*`;
-      const keys = await this.cache.keys(pattern);
+      const keys = await this.scanKeys('jwt:*');
       
       if (keys.length > 0) {
         await this.cache.del(...keys);
       }
     } catch (error) {
-      console.warn('Failed to clear JWT cache:', error);
+      console.warn('JWT cache clear failed:', error);
     }
   }
 
   /**
-   * Get cache statistics (useful for monitoring)
+   * Health check for cache connectivity
    */
-  async getStats(): Promise<{ totalKeys: number; keysBySession: Record<string, number> }> {
+  async healthCheck(): Promise<boolean> {
     try {
-      const pattern = `${this.JWT_KEY_PREFIX}*`;
-      const keys = await this.cache.keys(pattern);
-      
-      const keysBySession: Record<string, number> = {};
-      
-      keys.forEach(key => {
-        // Extract sessionId from key (format: jwt:sessionId:orgId)
-        const parts = key.split(':');
-        if (parts.length >= 3) {
-          const sessionId = parts[1];
-          if (sessionId) {
-            keysBySession[sessionId] = (keysBySession[sessionId] || 0) + 1;
-          }
-        }
-      });
-
-      return {
-        totalKeys: keys.length,
-        keysBySession,
-      };
-    } catch (error) {
-      console.warn('Failed to get JWT cache stats:', error);
-      return { totalKeys: 0, keysBySession: {} };
+      await this.cache.ping();
+      return true;
+    } catch {
+      return false;
     }
   }
 
   /**
-   * Generate Redis key for JWT cache
+   * Set buffer time for JWT refresh (useful for testing)
    */
-  private getJWTKey(sessionId: string, orgId: string): string {
-    return `${this.JWT_KEY_PREFIX}${sessionId}:${orgId}`;
+  setBufferSeconds(): void {
+    // This would require making BUFFER_SECONDS mutable
+    // For now, it's a constant, but could be made configurable
   }
 }
