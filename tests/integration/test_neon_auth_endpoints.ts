@@ -5,7 +5,7 @@ import { callbackRoutes } from '@/routes/auth/callback.js';
 import { logoutRoutes } from '@/routes/auth/logout.js';
 import { switchOrgRoutes } from '@/routes/auth/switch-org.js';
 
-describe('Phase 3: Neon Auth Authentication - Complete Validation', () => {
+describe('Neon Auth Endpoints Integration Test', () => {
   let app: ReturnType<typeof Fastify>;
 
   beforeEach(async () => {
@@ -104,7 +104,7 @@ describe('Phase 3: Neon Auth Authentication - Complete Validation', () => {
     }
   });
 
-  describe('Task 21: Login endpoint with Retool-style UI', () => {
+  describe('Login Endpoint Tests', () => {
     it('should serve HTML login page with Continue with Google button', async () => {
       const response = await app.inject({
         method: 'GET',

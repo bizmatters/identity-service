@@ -9,9 +9,9 @@ export class MockNeonAuthProvider {
   private baseURL: string;
   private server: any;
 
-  constructor(port = 3001) {
-    this.port = port;
-    this.baseURL = `http://localhost:${port}`;
+  constructor(port?: number) {
+    this.port = port || 0; // Use 0 for dynamic port allocation
+    this.baseURL = '';
   }
 
   async start(): Promise<void> {
@@ -67,7 +67,12 @@ export class MockNeonAuthProvider {
     });
     
     await new Promise<void>((resolve) => {
-      this.server.listen(this.port, '127.0.0.1', resolve);
+      this.server.listen(this.port, '127.0.0.1', () => {
+        // Get the actual port assigned by the OS
+        this.port = this.server.address().port;
+        this.baseURL = `http://localhost:${this.port}`;
+        resolve();
+      });
     });
   }
 

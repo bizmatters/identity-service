@@ -12,7 +12,6 @@ export interface ApiTokenResult {
 export interface TokenValidationResult {
   userId: string;
   orgId: string;
-  role: string;
   tokenId: string;
 }
 
@@ -90,7 +89,6 @@ export class TokenManager {
       return {
         userId: cached.userId,
         orgId: cached.orgId,
-        role: cached.role,
         tokenId: '', // Not stored in cache
       };
     }
@@ -101,16 +99,12 @@ export class TokenManager {
       throw new Error('Invalid or expired token');
     }
 
-    // For now, assume 'member' role - will be enhanced when user roles are implemented
-    const role = 'member';
-
     // Cache for future requests (P2 optimization)
-    await this.tokenCache.set(tokenHashPrefix, tokenData.user_id, tokenData.org_id, role);
+    await this.tokenCache.set(tokenHashPrefix, tokenData.user_id, tokenData.org_id, 'member'); // Role will be looked up by ValidationService
 
     return {
       userId: tokenData.user_id,
       orgId: tokenData.org_id,
-      role,
       tokenId: tokenData.id,
     };
   }

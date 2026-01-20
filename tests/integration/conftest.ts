@@ -22,7 +22,8 @@ beforeAll(async () => {
   
   // Start mock Neon Auth provider (external dependency - should be mocked)
   // Only mock external Neon Auth API, not the Neon database
-  mockNeonAuth = new MockNeonAuthProvider(3001);
+  // Use dynamic port allocation to avoid conflicts
+  mockNeonAuth = new MockNeonAuthProvider(); // No port specified = dynamic allocation
   await mockNeonAuth.start();
   
   // Set environment variable to point to mock Neon Auth API (environment variable override pattern)

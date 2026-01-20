@@ -18,6 +18,7 @@ export interface PlatformJWTPayload {
   org: string;             // org_id (UUID)
   role: string;            // owner, admin, developer, viewer, OR "system"
   ver: number;             // Membership version (P2: instant revocation)
+  aud: string;             // Audience - "platform-services"
   iat: number;             // Issued at (Unix timestamp)
   exp: number;             // Expiration (Unix timestamp, 5-15 minutes from iat)
 }
@@ -57,6 +58,7 @@ export class JWTManager {
       org: orgId,
       role,
       ver: membershipVersion,
+      aud: 'platform-services',
       iat: now,
       exp: now + expiration,
     };
@@ -82,6 +84,7 @@ export class JWTManager {
       org: orgId,
       role: 'system',
       ver: 1, // Services don't have membership versions
+      aud: 'platform-services',
       iat: now,
       exp: now + expiration,
     };
@@ -237,6 +240,7 @@ export class JWTManager {
         org: 'test-org',
         role: 'developer',
         ver: 1,
+        aud: 'platform-services',
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + 300, // 5 minutes
       };
