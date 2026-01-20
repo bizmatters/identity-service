@@ -1,6 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { JWTManager } from '../../modules/auth/jwt-manager.js';
 
 const ServiceTokenRequestSchema = Type.Object({
   serviceId: Type.String({ minLength: 1, maxLength: 100 }),
@@ -17,22 +16,27 @@ const ServiceTokenResponseSchema = Type.Object({
   permissions: Type.Array(Type.String()),
 });
 
-interface ServiceTokenRequest extends FastifyRequest {
-  body: {
-    serviceId: string;
-    orgId: string;
-    permissions: string[];
-    expirationHours?: number;
-  };
+interface ServiceTokenRequestBody {
+  serviceId: string;
+  orgId: string;
+  permissions: string[];
+  expirationHours?: number;
+}
+
+interface ServiceTokenRequest {
+  body: ServiceTokenRequestBody;
   headers: {
     'x-api-key'?: string;
     'x-service-identity'?: string;
+    'user-agent'?: string;
+    'x-mtls-validated'?: string;
   };
+  ip: string;
 }
 
-export async function machineRoutes(fastify: FastifyInstance) {
+export async function machineRoutes(fastify: FastifyInstance): Promise<void> {
   // Get dependencies from Fastify context
-  const jwtManager = fastify.jwtManager as JWTManager;
+  const jwtManager = fastify.jwtManager;
 
   /**
    * Service Account Token endpoint
@@ -57,10 +61,10 @@ export async function machineRoutes(fastify: FastifyInstance) {
         }),
       },
     },
-  }, async (request: ServiceTokenRequest, reply: FastifyReply) => {
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       // Validate service identity using multiple methods
-      const isAuthorized = await validateServiceIdentity(request, fastify);
+      const isAuthorized = await validateServiceIdentity(request as ServiceTokenRequest, fastify);
       
       if (!isAuthorized) {
         return reply.status(401).send({
@@ -70,7 +74,8 @@ export async function machineRoutes(fastify: FastifyInstance) {
       }
 
       // Validate permissions array
-      const validPermissions = validatePermissions(request.body.permissions);
+      const requestBody = request.body as ServiceTokenRequestBody;
+      const validPermissions = validatePermissions(requestBody.permissions);
       if (!validPermissions.isValid) {
         return reply.status(400).send({
           error: `Invalid permissions: ${validPermissions.error}`,
@@ -79,13 +84,13 @@ export async function machineRoutes(fastify: FastifyInstance) {
       }
 
       // Default to 12 hours if not specified
-      const expirationHours = request.body.expirationHours || 12;
+      const expirationHours = requestBody.expirationHours || 12;
 
       // Mint service account JWT
       const serviceToken = jwtManager.mintServiceJWT(
-        request.body.serviceId,
-        request.body.orgId,
-        request.body.permissions,
+        requestBody.serviceId,
+        requestBody.orgId,
+        requestBody.permissions,
         expirationHours
       );
 
@@ -94,30 +99,31 @@ export async function machineRoutes(fastify: FastifyInstance) {
       expiresAt.setHours(expiresAt.getHours() + expirationHours);
 
       // Log service token issuance for audit
-      fastify.log.info('Service token issued', {
-        serviceId: request.body.serviceId,
-        orgId: request.body.orgId,
-        permissions: request.body.permissions,
+      void fastify.log.info({
+        serviceId: requestBody.serviceId,
+        orgId: requestBody.orgId,
+        permissions: requestBody.permissions,
         expirationHours,
         expiresAt: expiresAt.toISOString(),
         requestIP: request.ip,
         userAgent: request.headers['user-agent'],
-      });
+      }, 'Service token issued');
 
       return reply.status(200).send({
         token: serviceToken,
         expiresAt: expiresAt.toISOString(),
-        serviceId: request.body.serviceId,
-        orgId: request.body.orgId,
-        permissions: request.body.permissions,
+        serviceId: requestBody.serviceId,
+        orgId: requestBody.orgId,
+        permissions: requestBody.permissions,
       });
 
     } catch (error) {
-      fastify.log.error('Service token creation error:', {
+      const requestBody = request.body as ServiceTokenRequestBody | undefined;
+      fastify.log.error({
         error: error instanceof Error ? error.message : 'Unknown error',
-        serviceId: request.body?.serviceId,
-        orgId: request.body?.orgId,
-      });
+        serviceId: requestBody?.serviceId,
+        orgId: requestBody?.orgId,
+      }, 'Service token creation error');
 
       return reply.status(500).send({
         error: 'Failed to create service token',
@@ -169,7 +175,7 @@ export async function machineRoutes(fastify: FastifyInstance) {
           sub: payload.sub,
           org: payload.org,
           role: payload.role,
-          permissions: (payload as any).permissions || [],
+          permissions: (payload as { permissions?: string[] }).permissions || [],
           exp: payload.exp,
         },
       });
@@ -193,7 +199,7 @@ async function validateServiceIdentity(
   // Method 1: API Key authentication
   const apiKey = request.headers['x-api-key'];
   if (apiKey) {
-    const validApiKey = process.env.SERVICE_API_KEY;
+    const validApiKey = process.env['SERVICE_API_KEY'];
     if (validApiKey && apiKey === validApiKey) {
       return true;
     }
@@ -220,11 +226,11 @@ async function validateServiceIdentity(
 
   // Method 4: Internal network without additional auth (least secure)
   // Only allow for development/testing
-  if (process.env.NODE_ENV === 'development' && isInternalIP(request.ip)) {
-    fastify.log.warn('Allowing service token request from internal network without authentication (development mode)', {
+  if (process.env['NODE_ENV'] === 'development' && isInternalIP(request.ip)) {
+    fastify.log.warn({
       ip: request.ip,
       serviceId: request.body.serviceId,
-    });
+    }, 'Allowing service token request from internal network without authentication (development mode)');
     return true;
   }
 

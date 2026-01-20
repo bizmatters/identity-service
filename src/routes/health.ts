@@ -11,27 +11,27 @@ const HealthResponseSchema = Type.Object({
   services: Type.Object({
     database: Type.Object({
       status: Type.Union([Type.Literal('healthy'), Type.Literal('unhealthy')]),
-      responseTime?: Type.Number(),
-      error?: Type.String(),
+      responseTime: Type.Optional(Type.Number()),
+      error: Type.Optional(Type.String()),
     }),
     cache: Type.Object({
       status: Type.Union([Type.Literal('healthy'), Type.Literal('unhealthy')]),
-      responseTime?: Type.Number(),
-      error?: Type.String(),
+      responseTime: Type.Optional(Type.Number()),
+      error: Type.Optional(Type.String()),
     }),
     jwt: Type.Object({
       status: Type.Union([Type.Literal('healthy'), Type.Literal('unhealthy')]),
-      error?: Type.String(),
+      error: Type.Optional(Type.String()),
     }),
   }),
-  version?: Type.String(),
+  version: Type.Optional(Type.String()),
 });
 
-export async function healthRoutes(fastify: FastifyInstance) {
+export async function healthRoutes(fastify: FastifyInstance): Promise<void> {
   // Get dependencies from Fastify context
-  const validationService = fastify.validationService as ValidationService;
-  const jwtManager = fastify.jwtManager as JWTManager;
-  const db = fastify.db as Kysely<Database>;
+  const validationService = fastify.validationService;
+  const jwtManager = fastify.jwtManager;
+  const db = fastify.db;
 
   /**
    * Health check endpoint
@@ -44,7 +44,7 @@ export async function healthRoutes(fastify: FastifyInstance) {
         503: HealthResponseSchema,
       },
     },
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
+  }, async (_request: FastifyRequest, reply: FastifyReply) => {
     const timestamp = new Date().toISOString();
     const checks = await Promise.allSettled([
       checkDatabaseHealth(db),
@@ -100,7 +100,7 @@ export async function healthRoutes(fastify: FastifyInstance) {
         cache: cacheHealth,
         jwt: jwtHealth,
       },
-      version: process.env.npm_package_version || 'unknown',
+      version: process.env['npm_package_version'] || 'unknown',
     };
 
     return reply.status(statusCode).send(response);
@@ -110,7 +110,7 @@ export async function healthRoutes(fastify: FastifyInstance) {
    * Readiness probe endpoint (Kubernetes)
    * Returns 200 only when all critical services are ready
    */
-  fastify.get('/ready', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/ready', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
       const [dbHealthy, cacheHealthy, jwtHealthy] = await Promise.all([
         checkDatabaseConnectivity(db),
@@ -147,7 +147,7 @@ export async function healthRoutes(fastify: FastifyInstance) {
    * Liveness probe endpoint (Kubernetes)
    * Returns 200 if the application is running (even if dependencies are down)
    */
-  fastify.get('/live', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/live', async (_request: FastifyRequest, reply: FastifyReply) => {
     return reply.status(200).send({
       status: 'alive',
       timestamp: new Date().toISOString(),

@@ -1,6 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { JWTManager, JWKS } from '../../modules/auth/jwt-manager.js';
 
 const JWKSResponseSchema = Type.Object({
   keys: Type.Array(Type.Object({
@@ -13,9 +12,9 @@ const JWKSResponseSchema = Type.Object({
   })),
 });
 
-export async function jwksRoutes(fastify: FastifyInstance) {
+export async function jwksRoutes(fastify: FastifyInstance): Promise<void> {
   // Get dependencies from Fastify context
-  const jwtManager = fastify.jwtManager as JWTManager;
+  const jwtManager = fastify.jwtManager;
 
   /**
    * JWKS endpoint for public key distribution
@@ -31,13 +30,13 @@ export async function jwksRoutes(fastify: FastifyInstance) {
         }),
       },
     },
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
+  }, async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
       // Get JWKS with current and previous keys (P1: Key Rotation Support)
       const jwks = jwtManager.getJWKS();
 
       // Set appropriate cache headers
-      reply.headers({
+      void reply.headers({
         'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
         'Content-Type': 'application/json',
       });
@@ -45,7 +44,7 @@ export async function jwksRoutes(fastify: FastifyInstance) {
       return reply.status(200).send(jwks);
 
     } catch (error) {
-      fastify.log.error('JWKS endpoint error:', error);
+      fastify.log.error(error, 'JWKS endpoint error');
 
       return reply.status(500).send({
         error: 'Failed to retrieve JWKS',
@@ -57,7 +56,7 @@ export async function jwksRoutes(fastify: FastifyInstance) {
   /**
    * Alternative JWKS endpoint path (some systems expect this path)
    */
-  fastify.get('/jwks.json', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/jwks.json', async (_request: FastifyRequest, reply: FastifyReply) => {
     // Redirect to the standard path
     return reply.redirect(301, '/.well-known/jwks.json');
   });
@@ -95,7 +94,7 @@ export async function jwksRoutes(fastify: FastifyInstance) {
       };
 
       // Set appropriate cache headers
-      reply.headers({
+      void reply.headers({
         'Cache-Control': 'public, max-age=86400', // Cache for 24 hours
         'Content-Type': 'application/json',
       });
@@ -103,7 +102,7 @@ export async function jwksRoutes(fastify: FastifyInstance) {
       return reply.status(200).send(openidConfig);
 
     } catch (error) {
-      fastify.log.error('OpenID configuration endpoint error:', error);
+      fastify.log.error(error, 'OpenID configuration endpoint error');
 
       return reply.status(500).send({
         error: 'Failed to retrieve OpenID configuration',
@@ -115,7 +114,7 @@ export async function jwksRoutes(fastify: FastifyInstance) {
   /**
    * Health check for JWKS functionality
    */
-  fastify.get('/.well-known/health', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/.well-known/health', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
       // Test JWT manager functionality
       const isHealthy = jwtManager.healthCheck();
@@ -135,7 +134,7 @@ export async function jwksRoutes(fastify: FastifyInstance) {
       }
 
     } catch (error) {
-      fastify.log.error('JWKS health check error:', error);
+      fastify.log.error(error, 'JWKS health check error');
 
       return reply.status(503).send({
         status: 'error',

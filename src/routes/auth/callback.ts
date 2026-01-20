@@ -111,7 +111,7 @@ export function callbackRoutes(
         reply.setCookie('__Host-platform_session', sessionId, cookieOptions);
 
         // Log successful authentication for audit
-        fastify.log.info({
+        void fastify.log.info({
           userId: platformContext.userId,
           orgId: platformContext.orgId,
           role: platformContext.role,

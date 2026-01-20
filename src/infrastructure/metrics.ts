@@ -301,6 +301,6 @@ export function clearMetrics(): void {
 /**
  * Get metrics registry (for custom metrics)
  */
-export function getRegistry() {
+export function getRegistry(): typeof register {
   return register;
 }

@@ -1,7 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { Type } from '@sinclair/typebox';
-import { TokenManager } from '../../modules/auth/token-manager.js';
-import { ValidationService } from '../../modules/auth/validation-service.js';
 
 const CreateTokenSchema = Type.Object({
   description: Type.String({ minLength: 1, maxLength: 255 }),
@@ -16,20 +14,10 @@ const TokenResponseSchema = Type.Object({
   createdAt: Type.String({ format: 'date-time' }),
 });
 
-interface CreateTokenRequest extends FastifyRequest {
-  body: {
-    description: string;
-    expiresAt?: string;
-  };
-  headers: {
-    cookie?: string;
-  };
-}
-
-export async function tokenRoutes(fastify: FastifyInstance) {
+export async function tokenRoutes(fastify: FastifyInstance): Promise<void> {
   // Get dependencies from Fastify context
-  const tokenManager = fastify.tokenManager as TokenManager;
-  const validationService = fastify.validationService as ValidationService;
+  const tokenManager = fastify.tokenManager;
+  const validationService = fastify.validationService;
 
   /**
    * Create API Token endpoint
@@ -50,7 +38,7 @@ export async function tokenRoutes(fastify: FastifyInstance) {
         }),
       },
     },
-  }, async (request: CreateTokenRequest, reply: FastifyReply) => {
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       // Require valid session cookie
       const cookieHeader = request.headers.cookie;
@@ -73,9 +61,10 @@ export async function tokenRoutes(fastify: FastifyInstance) {
       const validation = await validationService.validateSession(sessionId);
 
       // Parse optional expiration date
+      const requestBody = request.body as { expiresAt?: string; description: string };
       let expiresAt: Date | undefined;
-      if (request.body.expiresAt) {
-        expiresAt = new Date(request.body.expiresAt);
+      if (requestBody.expiresAt) {
+        expiresAt = new Date(requestBody.expiresAt);
         
         // Validate expiration is in the future
         if (expiresAt <= new Date()) {
@@ -101,7 +90,7 @@ export async function tokenRoutes(fastify: FastifyInstance) {
       const tokenResult = await tokenManager.createApiToken(
         validation.userId,
         validation.orgId,
-        request.body.description,
+        requestBody.description,
         expiresAt
       );
 
@@ -115,7 +104,7 @@ export async function tokenRoutes(fastify: FastifyInstance) {
       });
 
     } catch (error) {
-      fastify.log.error('Token creation error:', error);
+      fastify.log.error(error, 'Token creation error');
       
       if (error instanceof Error && error.message.includes('Invalid or expired session')) {
         return reply.status(401).send({
@@ -173,7 +162,7 @@ export async function tokenRoutes(fastify: FastifyInstance) {
       }
 
       // Validate session and get user context
-      const validation = await validationService.validateSession(sessionId);
+      await validationService.validateSession(sessionId);
 
       // TODO: Implement token listing in TokenRepository
       // For now, return empty array
@@ -182,7 +171,7 @@ export async function tokenRoutes(fastify: FastifyInstance) {
       });
 
     } catch (error) {
-      fastify.log.error('Token listing error:', error);
+      fastify.log.error(error, 'Token listing error');
       
       if (error instanceof Error && error.message.includes('Invalid or expired session')) {
         return reply.status(401).send({
@@ -241,7 +230,7 @@ export async function tokenRoutes(fastify: FastifyInstance) {
       }
 
       // Validate session and get user context
-      const validation = await validationService.validateSession(sessionId);
+      await validationService.validateSession(sessionId);
 
       // TODO: Add authorization check - user can only revoke their own tokens
       // This would require TokenRepository.findByTokenId to check ownership
@@ -254,7 +243,7 @@ export async function tokenRoutes(fastify: FastifyInstance) {
       });
 
     } catch (error) {
-      fastify.log.error('Token revocation error:', error);
+      fastify.log.error(error, 'Token revocation error');
       
       if (error instanceof Error && error.message.includes('Invalid or expired session')) {
         return reply.status(401).send({

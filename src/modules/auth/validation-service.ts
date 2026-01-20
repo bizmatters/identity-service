@@ -1,7 +1,7 @@
-import { SessionManager, SessionData } from './session-manager.js';
-import { TokenManager, TokenValidationResult } from './token-manager.js';
+import { SessionManager } from './session-manager.js';
+import { TokenManager } from './token-manager.js';
 import { PermissionCache, CachedPermission } from './permission-cache.js';
-import { OrgRepository, UserRoleWithVersion } from '../org/org-repository.js';
+import { OrgRepository } from '../org/org-repository.js';
 
 export interface ValidationResult {
   userId: string;

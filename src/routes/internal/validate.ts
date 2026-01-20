@@ -1,26 +1,17 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { ValidationService, ValidationError } from '../../modules/auth/validation-service.js';
-import { JWTManager } from '../../modules/auth/jwt-manager.js';
-import { JWTCache } from '../../modules/auth/jwt-cache.js';
+import { ValidationError } from '../../modules/auth/validation-service.js';
 
-interface ValidateRequest extends FastifyRequest {
-  headers: {
-    cookie?: string;
-    authorization?: string;
-  };
-}
-
-export async function validateRoutes(fastify: FastifyInstance) {
+export async function validateRoutes(fastify: FastifyInstance): Promise<void> {
   // Get dependencies from Fastify context
-  const validationService = fastify.validationService as ValidationService;
-  const jwtManager = fastify.jwtManager as JWTManager;
-  const jwtCache = fastify.jwtCache as JWTCache;
+  const validationService = fastify.validationService;
+  const jwtManager = fastify.jwtManager;
+  const jwtCache = fastify.jwtCache;
 
   /**
    * HTTP extAuthz endpoint for AgentGateway
    * Requirements: 2.1, 2.2, 2.3, 2.11, 4.6, 4.7, 4.12, 4.13, 8.1
    */
-  fastify.post('/internal/validate', async (request: ValidateRequest, reply: FastifyReply) => {
+  fastify.post('/internal/validate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       let validationResult;
       let sessionId: string | null = null;
@@ -105,7 +96,7 @@ export async function validateRoutes(fastify: FastifyInstance) {
       }
 
       // Log unexpected errors but don't expose details
-      fastify.log.error('Validation endpoint error:', error);
+      fastify.log.error(error, 'Validation endpoint error');
       return reply.status(401).send({ 
         error: 'Authentication failed',
         code: 'AUTH_ERROR',
@@ -116,7 +107,7 @@ export async function validateRoutes(fastify: FastifyInstance) {
   /**
    * Health check endpoint for extAuthz service
    */
-  fastify.get('/internal/health', async (request, reply) => {
+  fastify.get('/internal/health', async (_request, reply) => {
     try {
       const health = await validationService.healthCheck();
       const jwtHealth = jwtManager.healthCheck();
@@ -141,7 +132,7 @@ export async function validateRoutes(fastify: FastifyInstance) {
         });
       }
     } catch (error) {
-      fastify.log.error('Health check error:', error);
+      fastify.log.error(error, 'Health check error');
       return reply.status(503).send({
         status: 'error',
         error: 'Health check failed',

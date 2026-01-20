@@ -36,7 +36,7 @@ export function logoutRoutes(
 
         // Log successful logout for audit
         if (sessionData) {
-          fastify.log.info({
+          void fastify.log.info({
             userId: sessionData.user_id,
             orgId: sessionData.org_id,
             sessionId,
