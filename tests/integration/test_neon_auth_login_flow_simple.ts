@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Fastify from 'fastify';
-import { loginRoutes } from '@/routes/auth/login.js';
+import { loginRoutes } from '../../src/routes/auth/login.js';
 
 describe('Neon Auth Login Flow - Core Logic Test', () => {
   let app: ReturnType<typeof Fastify>;

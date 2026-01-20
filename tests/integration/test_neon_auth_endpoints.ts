@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Fastify from 'fastify';
-import { loginRoutes } from '@/routes/auth/login.js';
-import { callbackRoutes } from '@/routes/auth/callback.js';
-import { logoutRoutes } from '@/routes/auth/logout.js';
-import { switchOrgRoutes } from '@/routes/auth/switch-org.js';
+import { loginRoutes } from '../../src/routes/auth/login.js';
+import { callbackRoutes } from '../../src/routes/auth/callback.js';
+import { logoutRoutes } from '../../src/routes/auth/logout.js';
+import { switchOrgRoutes } from '../../src/routes/auth/switch-org.js';
 
 describe('Neon Auth Endpoints Integration Test', () => {
   let app: ReturnType<typeof Fastify>;
