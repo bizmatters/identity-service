@@ -40,10 +40,14 @@ describe('Neon Auth Login Flow Integration Test', () => {
       cookieName: '__Host-platform_session',
     });
 
-    // Use environment variables like production
+    // Use environment variables like production (SSM in prod)
+    // Keys are stored with \n escape sequences, convert to actual newlines
+    const privateKey = process.env.JWT_PRIVATE_KEY!.replace(/\\n/g, '\n');
+    const publicKey = process.env.JWT_PUBLIC_KEY!.replace(/\\n/g, '\n');
+    
     jwtManager = new JWTManager({
-      privateKey: process.env.JWT_PRIVATE_KEY!.replace(/\\n/g, '\n'),
-      publicKey: process.env.JWT_PUBLIC_KEY!.replace(/\\n/g, '\n'),
+      privateKey,
+      publicKey,
       keyId: process.env.JWT_KEY_ID!,
       expiration: '10m',
     });
