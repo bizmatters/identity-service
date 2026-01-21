@@ -162,12 +162,20 @@ export async function tokenRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Validate session and get user context
-      await validationService.validateSession(sessionId);
+      const validation = await validationService.validateSession(sessionId);
 
-      // TODO: Implement token listing in TokenRepository
-      // For now, return empty array
+      // List user's tokens for current organization
+      const tokenRepository = fastify.tokenRepository;
+      const tokens = await tokenRepository.listUserTokens(validation.userId, validation.orgId);
+
       return reply.status(200).send({
-        tokens: [],
+        tokens: tokens.map(token => ({
+          tokenId: token.id,
+          description: token.description,
+          expiresAt: token.expires_at?.toISOString() || null,
+          createdAt: token.created_at.toISOString(),
+          lastUsed: token.last_used_at?.toISOString() || null,
+        })),
       });
 
     } catch (error) {
@@ -230,13 +238,22 @@ export async function tokenRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Validate session and get user context
-      await validationService.validateSession(sessionId);
+      const validation = await validationService.validateSession(sessionId);
 
-      // TODO: Add authorization check - user can only revoke their own tokens
-      // This would require TokenRepository.findByTokenId to check ownership
+      // Check token ownership and revoke
+      const tokenRepository = fastify.tokenRepository;
+      const deleted = await tokenRepository.deleteUserToken(
+        request.params.tokenId,
+        validation.userId,
+        validation.orgId
+      );
 
-      // Revoke the token
-      await tokenManager.revokeApiToken(request.params.tokenId);
+      if (!deleted) {
+        return reply.status(404).send({
+          error: 'Token not found or access denied',
+          code: 'TOKEN_NOT_FOUND',
+        });
+      }
 
       return reply.status(200).send({
         message: 'Token revoked successfully',

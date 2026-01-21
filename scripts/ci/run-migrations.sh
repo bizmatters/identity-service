@@ -21,28 +21,16 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 main() {
     log_info "Starting database migrations for identity-service..."
     
-    # Validate required environment variables
-    required_vars=("POSTGRES_HOST" "POSTGRES_PORT" "POSTGRES_DB" "POSTGRES_USER" "POSTGRES_PASSWORD")
-    for var in "${required_vars[@]}"; do
-        if [[ -z "${!var:-}" ]]; then
-            log_error "Required environment variable not set: $var"
-            return 1
-        fi
-    done
+    # Check if DATABASE_URL is set
+    if [[ -z "${DATABASE_URL:-}" ]]; then
+        log_error "Required environment variable not set: DATABASE_URL"
+        return 1
+    fi
     
-    log_info "Database connection: ${POSTGRES_USER}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
-    
-    # Wait for PostgreSQL to be ready
-    log_info "Waiting for PostgreSQL to be ready..."
-    until pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER"; do
-        echo "PostgreSQL not ready, waiting..."
-        sleep 2
-    done
-    
-    log_success "PostgreSQL is ready"
+    log_info "Using DATABASE_URL for connection"
     
     # Set migration directory
-    MIGRATION_DIR="${MIGRATION_DIR:-/app/migrations}"
+    MIGRATION_DIR="${MIGRATION_DIR:-./migrations}"
     
     if [[ ! -d "$MIGRATION_DIR" ]]; then
         log_error "Migration directory not found: $MIGRATION_DIR"
@@ -51,12 +39,12 @@ main() {
     
     log_info "Running migrations from: $MIGRATION_DIR"
     
-    # Run each migration file in order (001, 002, 003, 004)
+    # Run each migration file in order (001, 002, 003, 004, 005)
     migration_count=0
     for migration in "$MIGRATION_DIR"/*.sql; do
         if [[ -f "$migration" ]]; then
             log_info "Running migration: $(basename "$migration")"
-            PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$migration"
+            psql "$DATABASE_URL" -f "$migration"
             migration_count=$((migration_count + 1))
         fi
     done

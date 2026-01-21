@@ -11,6 +11,7 @@ import { PermissionCache } from '../../src/modules/auth/permission-cache.js';
 import { SessionManager, SessionConfig } from '../../src/modules/auth/session-manager.js';
 import { TokenRepository } from '../../src/modules/token/token-repository.js';
 import { OrgRepository } from '../../src/modules/org/org-repository.js';
+import { UserRepository } from '../../src/modules/user/user-repository.js';
 
 describe('API Token Flow Integration Test', () => {
   let tokenManager: TokenManager;
@@ -18,6 +19,8 @@ describe('API Token Flow Integration Test', () => {
   let validationService: ValidationService;
   let jwtManager: JWTManager;
   let tokenRepository: TokenRepository;
+  let userRepository: UserRepository;
+  let sessionManager: SessionManager;
   let testUser: { id: string; external_id: string; email: string };
   let testOrg: { id: string; name: string; slug: string };
 
@@ -44,17 +47,17 @@ describe('API Token Flow Integration Test', () => {
     tokenCache = new TokenCache(cache);
     tokenManager = new TokenManager(tokenRepository, tokenCache, 'test-pepper-secret');
     jwtManager = new JWTManager(jwtConfig);
+    userRepository = new UserRepository(db);
+    
+    const sessionConfig: SessionConfig = {
+      sessionTTL: 3600,
+      absoluteTTL: 86400,
+      cookieName: '__Host-platform_session',
+    };
+    sessionManager = new SessionManager(cache, sessionConfig);
     
     const permissionCache = new PermissionCache(cache);
     const orgRepository = new OrgRepository(db);
-    
-    // Create session manager (not used in token tests but required for ValidationService)
-    const sessionConfig: SessionConfig = {
-      sessionTTL: 86400,
-      absoluteTTL: 604800,
-      cookieName: '__Host-platform_session',
-    };
-    const sessionManager = new SessionManager(cache, sessionConfig);
 
     validationService = new ValidationService(
       sessionManager,
@@ -351,5 +354,64 @@ describe('API Token Flow Integration Test', () => {
     // Different peppers would produce different hashes, providing security
     // against brute-force attacks even if the token format is known
     expect(token1.token).toMatch(/^sk_live_[a-f0-9]{64}$/);
+  });
+
+  describe('API Token CRUD Operations', () => {
+    let userId: string;
+    let orgId: string;
+    let sessionId: string;
+
+    beforeEach(async () => {
+      const userResult = await userRepository.createUserWithDefaultOrg(
+        'test-user-ext-id',
+        'user@example.com',
+        'Test Organization',
+        'test-org'
+      );
+
+      userId = userResult.user.id;
+      orgId = userResult.organization.id;
+      sessionId = await sessionManager.createSession(userId, orgId, 'owner');
+    });
+
+    it('should list user tokens', async () => {
+      // Create test tokens
+      const token1 = await tokenManager.createApiToken(userId, orgId, 'Test Token 1');
+      const token2 = await tokenManager.createApiToken(userId, orgId, 'Test Token 2');
+
+      // List tokens
+      const tokens = await tokenRepository.listUserTokens(userId, orgId);
+
+      expect(tokens).toHaveLength(2);
+      expect(tokens[0].description).toBe('Test Token 2'); // Ordered by created_at desc
+      expect(tokens[1].description).toBe('Test Token 1');
+    });
+
+    it('should delete user token with ownership validation', async () => {
+      // Create token
+      const token = await tokenManager.createApiToken(userId, orgId, 'Test Token');
+
+      // Delete with correct ownership
+      const deleted = await tokenRepository.deleteUserToken(token.tokenId, userId, orgId);
+      expect(deleted).toBe(true);
+
+      // Verify token is deleted
+      const tokens = await tokenRepository.listUserTokens(userId, orgId);
+      expect(tokens).toHaveLength(0);
+    });
+
+    it('should not delete token with wrong ownership', async () => {
+      // Create token
+      const token = await tokenManager.createApiToken(userId, orgId, 'Test Token');
+
+      // Try to delete with wrong user
+      const wrongUserId = '550e8400-e29b-41d4-a716-446655440000'; // Valid UUID format
+      const deleted = await tokenRepository.deleteUserToken(token.tokenId, wrongUserId, orgId);
+      expect(deleted).toBe(false);
+
+      // Verify token still exists
+      const tokens = await tokenRepository.listUserTokens(userId, orgId);
+      expect(tokens).toHaveLength(1);
+    });
   });
 });

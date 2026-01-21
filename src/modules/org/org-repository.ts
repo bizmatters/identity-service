@@ -6,6 +6,15 @@ export interface UserRoleWithVersion {
   version: number;
 }
 
+export interface UserOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  role: 'owner' | 'admin' | 'developer' | 'viewer';
+  is_default: boolean;
+  created_at: Date;
+}
+
 export class OrgRepository {
   constructor(private db: Kysely<Database>) { }
 
@@ -43,6 +52,31 @@ export class OrgRepository {
       .where('user_id', '=', userId)
       .where('org_id', '=', orgId)
       .executeTakeFirst();
+  }
+
+  async getUserOrganizations(userId: string): Promise<UserOrganization[]> {
+    return this.db
+      .selectFrom('organizations')
+      .innerJoin('memberships', 'organizations.id', 'memberships.org_id')
+      .leftJoin('users', 'memberships.user_id', 'users.id')
+      .select([
+        'organizations.id',
+        'organizations.name',
+        'organizations.slug',
+        'memberships.role',
+        'organizations.created_at',
+      ])
+      .select((eb) =>
+        eb.case()
+          .when('organizations.id', '=', eb.ref('users.default_org_id'))
+          .then(true)
+          .else(false)
+          .end()
+          .as('is_default')
+      )
+      .where('memberships.user_id', '=', userId)
+      .orderBy('organizations.name', 'asc')
+      .execute();
   }
 
   // P2: Membership Versioning for instant revocation

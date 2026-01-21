@@ -4,6 +4,9 @@ import { createCache } from '../../src/infrastructure/cache.js';
 import { UserRepository } from '../../src/modules/user/user-repository.js';
 import { OrgRepository } from '../../src/modules/org/org-repository.js';
 import { SessionManager } from '../../src/modules/auth/session-manager.js';
+import { TokenManager } from '../../src/modules/auth/token-manager.js';
+import { TokenRepository } from '../../src/modules/token/token-repository.js';
+import { TokenCache } from '../../src/modules/auth/token-cache.js';
 import { authLogger } from '../../src/infrastructure/logger.js';
 import { CONFIG } from '../../src/config/index.js';
 
@@ -26,6 +29,9 @@ describe('Organization Management Integration Tests', () => {
   let userRepository: UserRepository;
   let orgRepository: OrgRepository;
   let sessionManager: SessionManager;
+  let tokenManager: TokenManager;
+  let tokenRepository: TokenRepository;
+  let tokenCache: TokenCache;
 
   // Test data
   const testUser1 = {
@@ -56,12 +62,20 @@ describe('Organization Management Integration Tests', () => {
     // Initialize repositories using production service classes
     userRepository = new UserRepository(db);
     orgRepository = new OrgRepository(db);
+    tokenRepository = new TokenRepository(db);
+    tokenCache = new TokenCache(cache);
     
     sessionManager = new SessionManager(cache, {
       sessionTTL: CONFIG.SESSION_TTL,
       absoluteTTL: CONFIG.SESSION_ABSOLUTE_TTL,
       cookieName: CONFIG.SESSION_COOKIE_NAME,
     });
+
+    tokenManager = new TokenManager(
+      tokenRepository,
+      tokenCache,
+      process.env.TOKEN_PEPPER || 'test-pepper'
+    );
 
     // Clean database state for each test
     await db.deleteFrom('memberships').execute();
@@ -402,6 +416,72 @@ describe('Organization Management Integration Tests', () => {
       // Verify cache cleanup
       const cachedSession = await cache.get(`session:${sessionId}`);
       expect(cachedSession).toBeNull();
+    });
+  });
+
+  describe('Organization Listing', () => {
+    let userId: string;
+    let org1Id: string;
+    let org2Id: string;
+
+    beforeEach(async () => {
+      // Create user with default organization
+      const userResult = await userRepository.createUserWithDefaultOrg(
+        testUser1.external_id,
+        testUser1.email,
+        testOrg1.name,
+        testOrg1.slug
+      );
+
+      userId = userResult.user.id;
+      org1Id = userResult.organization.id;
+
+      // Create second organization with same user as owner
+      const org2 = await orgRepository.createOrganization(
+        testOrg2.name,
+        testOrg2.slug,
+        userId
+      );
+      org2Id = org2.id;
+    });
+
+    it('should list user organizations with correct details', async () => {
+      // Test Requirements 10.8, 10.9, 10.10, 10.12, 10.13
+      const organizations = await orgRepository.getUserOrganizations(userId);
+
+      expect(organizations).toHaveLength(2);
+      
+      // Should be ordered by name (Test Organization 1, Test Organization 2)
+      expect(organizations[0].name).toBe(testOrg1.name);
+      expect(organizations[1].name).toBe(testOrg2.name);
+
+      // Validate first organization (default)
+      expect(organizations[0].id).toBe(org1Id);
+      expect(organizations[0].slug).toBe(testOrg1.slug);
+      expect(organizations[0].role).toBe('owner');
+      expect(organizations[0].is_default).toBe(true);
+
+      // Validate second organization
+      expect(organizations[1].id).toBe(org2Id);
+      expect(organizations[1].slug).toBe(testOrg2.slug);
+      expect(organizations[1].role).toBe('owner');
+      expect(organizations[1].is_default).toBe(false);
+    });
+
+    it('should return empty list for user with no organizations', async () => {
+      // Create user without organizations
+      const orphanUser = await db
+        .insertInto('users')
+        .values({
+          external_id: 'orphan-user',
+          email: 'orphan@example.com',
+          default_org_id: null,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+
+      const organizations = await orgRepository.getUserOrganizations(orphanUser.id);
+      expect(organizations).toHaveLength(0);
     });
   });
 

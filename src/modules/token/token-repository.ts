@@ -8,6 +8,15 @@ export interface TokenData {
   description: string;
   expires_at: Date | null;
   created_at: Date;
+  last_used_at?: Date | null;
+}
+
+export interface TokenListItem {
+  id: string;
+  description: string;
+  expires_at: Date | null;
+  created_at: Date;
+  last_used_at: Date | null;
 }
 
 export class TokenRepository {
@@ -49,9 +58,52 @@ export class TokenRepository {
     return result;
   }
 
+  async findByTokenId(tokenId: string): Promise<TokenData | undefined> {
+    return this.db
+      .selectFrom('api_tokens')
+      .select(['id', 'user_id', 'org_id', 'description', 'expires_at', 'created_at', 'last_used_at'])
+      .where('id', '=', tokenId)
+      .executeTakeFirst();
+  }
+
+  async listUserTokens(userId: string, orgId: string): Promise<TokenListItem[]> {
+    return this.db
+      .selectFrom('api_tokens')
+      .select(['id', 'description', 'expires_at', 'created_at', 'last_used_at'])
+      .where('user_id', '=', userId)
+      .where('org_id', '=', orgId)
+      .where((eb) =>
+        eb.or([
+          eb('expires_at', 'is', null),
+          eb('expires_at', '>', new Date()),
+        ])
+      )
+      .orderBy('created_at', 'desc')
+      .execute();
+  }
+
   async deleteToken(tokenId: string): Promise<void> {
     await this.db
       .deleteFrom('api_tokens')
+      .where('id', '=', tokenId)
+      .execute();
+  }
+
+  async deleteUserToken(tokenId: string, userId: string, orgId: string): Promise<boolean> {
+    const result = await this.db
+      .deleteFrom('api_tokens')
+      .where('id', '=', tokenId)
+      .where('user_id', '=', userId)
+      .where('org_id', '=', orgId)
+      .executeTakeFirst();
+
+    return result.numDeletedRows > 0;
+  }
+
+  async updateLastUsed(tokenId: string): Promise<void> {
+    await this.db
+      .updateTable('api_tokens')
+      .set({ last_used_at: new Date() })
       .where('id', '=', tokenId)
       .execute();
   }

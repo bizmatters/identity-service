@@ -12,12 +12,14 @@ import { TokenManager } from '../../src/modules/auth/token-manager.js';
 import { TokenCache } from '../../src/modules/auth/token-cache.js';
 import { OrgRepository } from '../../src/modules/org/org-repository.js';
 import { TokenRepository } from '../../src/modules/token/token-repository.js';
+import { UserRepository } from '../../src/modules/user/user-repository.js';
 
 describe('Session Validation Flow Integration Test', () => {
   let sessionManager: SessionManager;
   let validationService: ValidationService;
   let jwtManager: JWTManager;
   let jwtCache: JWTCache;
+  let userRepository: UserRepository;
   let permissionCache: PermissionCache;
   let orgRepository: OrgRepository;
   let testUser: { id: string; external_id: string; email: string };
@@ -53,6 +55,7 @@ describe('Session Validation Flow Integration Test', () => {
     jwtCache = new JWTCache(cache);
     permissionCache = new PermissionCache(cache);
     orgRepository = new OrgRepository(db);
+    userRepository = new UserRepository(db);
     
     // Create token dependencies (not used in this test but required for ValidationService)
     const tokenRepository = new TokenRepository(db);
@@ -352,5 +355,46 @@ describe('Session Validation Flow Integration Test', () => {
     expect(responseHeaders['Authorization']).toContain('Bearer ');
     expect(responseHeaders['X-Auth-User-Id']).toBe(testUser.id);
     expect(responseHeaders['X-Auth-Org-Id']).toBe(testOrg.id);
+  });
+
+  describe('Session Termination (Logout)', () => {
+    let userId: string;
+    let orgId: string;
+    let sessionId: string;
+
+    beforeEach(async () => {
+      const userResult = await userRepository.createUserWithDefaultOrg(
+        'test-user-ext-id',
+        'user@example.com',
+        'Test Organization',
+        'test-org'
+      );
+
+      userId = userResult.user.id;
+      orgId = userResult.organization.id;
+      sessionId = await sessionManager.createSession(userId, orgId, 'owner');
+    });
+
+    it('should terminate session and clear cache', async () => {
+      // Verify session exists
+      let session = await sessionManager.getSession(sessionId);
+      expect(session).toBeDefined();
+
+      // Delete session (logout)
+      await sessionManager.deleteSession(sessionId);
+
+      // Verify session is removed
+      session = await sessionManager.getSession(sessionId);
+      expect(session).toBeNull();
+
+      // Verify cache cleanup
+      const cachedSession = await cache.get(`session:${sessionId}`);
+      expect(cachedSession).toBeNull();
+    });
+
+    it('should handle logout of non-existent session gracefully', async () => {
+      // Delete non-existent session should not throw
+      await expect(sessionManager.deleteSession('non-existent-session')).resolves.not.toThrow();
+    });
   });
 });
