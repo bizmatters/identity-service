@@ -27,8 +27,9 @@ RUN apk add --no-cache dumb-init postgresql-client bash
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Copy built application, dependencies, test files, scripts, and migrations
+# Copy built application, dependencies, test files, scripts, migrations, and source files
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
+COPY --from=builder --chown=nodejs:nodejs /app/src ./src
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nodejs:nodejs /app/package.json ./
 COPY --from=builder --chown=nodejs:nodejs /app/tests ./tests
@@ -41,8 +42,8 @@ COPY --from=builder --chown=nodejs:nodejs /app/vitest.integration.config.ts ./
 # Make scripts executable
 RUN chmod +x ./scripts/ci/*.sh
 
-# Switch to non-root user
-USER nodejs
+# Keep root user for vitest permissions in test containers
+# USER nodejs
 
 # Expose port
 EXPOSE 3000
