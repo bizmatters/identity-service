@@ -19,6 +19,8 @@ h6pwj1qCppiOv1cOhPBlqG8","kty":"OKP","kid":"fdaebf28-d281-4d9d-9ba4-0be06049d783
 docker build -t identity-service:ci-test .
 kind load docker-image identity-service:ci-test --name zerotouch-preview
 
+### Use this command when all env.var in-cluster ES already exists
+
 kubectl run integration-test-oidc --image=identity-service:ci-test --rm -i --restart=Never -n platform-identity --overrides='
 {
   "spec": {
@@ -38,6 +40,8 @@ kubectl run integration-test-oidc --image=identity-service:ci-test --rm -i --res
     ]
   }
 }'
+
+### Use this command when all env.var in-cluster ES do not exist and you want to pass them as env.var and valiate before creating the ES
 
 kubectl run integration-test-oidc --image=identity-service:ci-test --rm -i --restart=Never -n platform-identity --overrides='
 {
