@@ -26,7 +26,7 @@ export const CONFIG = {
       ? 'identity-service-staging'
       : isDev
         ? 'identity-service-dev'
-        : 'identity-service-pr', // local/test
+        : 'identity-service-pr', // local/test/pr - all resolve to PR environment
 
   ALLOWED_REDIRECT_URIS: isLocal
     ? ['https://platform.zerotouch.dev/dashboard', 'http://localhost:3000/dashboard']

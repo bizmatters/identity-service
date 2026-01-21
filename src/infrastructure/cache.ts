@@ -1,4 +1,6 @@
 import Redis, { RedisOptions } from 'ioredis';
+import { infraLogger } from './logger.js';
+import { resilientOperations } from './resilience.js';
 
 export function createCache(): Redis {
   // Use cluster Redis connection from Dragonfly
@@ -23,15 +25,23 @@ export function createCache(): Redis {
   }
 
   const redis = new Redis(config);
+  
+  // Log cache connection
+  infraLogger.cacheConnected();
+  
   return redis;
 }
 
 // Health check
 export async function checkCacheHealth(redis: Redis): Promise<boolean> {
   try {
-    const result = await redis.ping();
+    // Use resilient cache operation for health check
+    const result = await resilientOperations.cacheCall(async () => {
+      return redis.ping();
+    }, 'health_check');
     return result === 'PONG';
-  } catch {
+  } catch (error) {
+    infraLogger.cacheError(error instanceof Error ? error : new Error(String(error)), 'health_check');
     return false;
   }
 }

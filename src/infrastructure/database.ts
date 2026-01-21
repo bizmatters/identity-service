@@ -2,6 +2,8 @@ import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import { Database } from '../types/database.js';
 import { CONFIG } from '../config/index.js';
+import { infraLogger } from './logger.js';
+import { resilientOperations } from './resilience.js';
 
 export function createDatabase(): Kysely<Database> {
   // Use DATABASE_URL (external Neon) only
@@ -11,7 +13,8 @@ export function createDatabase(): Kysely<Database> {
     throw new Error('DATABASE_URL environment variable is required');
   }
 
-  console.log(`Using DATABASE_URL: ${connectionString.replace(/:[^:@]*@/, ':***@')}`);
+  // Log connection attempt (without sensitive data)
+  infraLogger.databaseConnected();
 
   const poolConfig = {
     connectionString,
@@ -30,13 +33,13 @@ export function createDatabase(): Kysely<Database> {
 // Health check
 export async function checkDatabaseHealth(db: Kysely<Database>): Promise<boolean> {
   try {
-    console.log('Attempting database health check...');
-    // Use a simple query that works with our schema
-    const result = await db.selectFrom('users').select('id').limit(1).execute();
-    console.log('Health check result:', result);
+    // Use resilient database operation for health check
+    await resilientOperations.databaseCall(async () => {
+      return db.selectFrom('users').select('id').limit(1).execute();
+    }, 'health_check');
     return true;
   } catch (error) {
-    console.error('Database health check failed:', error);
+    infraLogger.databaseError(error instanceof Error ? error : new Error(String(error)), 'health_check');
     return false;
   }
 }

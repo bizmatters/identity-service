@@ -10,6 +10,12 @@ build:
 test:
   timeout: 600
   parallel: true
+  command: "npm run test:integration"
+  test_patterns:
+    - "tests/integration/**/*.ts"
+  coverage:
+    enabled: true
+    threshold: 80
 
 deployment:
   wait_timeout: 300
@@ -20,10 +26,12 @@ dependencies:
   platform:
     - apis
     - databases
-  external: []
+  external:
+    - neon-auth  # Neon Auth API calls
+    - neon-db  # Neon DB API calls
+
   internal:
-    - postgres
-    - redis
+    - redis      # Use real Redis/Dragonfly from platform
 
 env:
   NODE_ENV: "test"

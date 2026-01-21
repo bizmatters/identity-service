@@ -2,6 +2,9 @@
 import Fastify from 'fastify';
 import { createDatabase } from './infrastructure/database.js';
 import { createCache } from './infrastructure/cache.js';
+import { logger, requestCorrelationMiddleware, infraLogger } from './infrastructure/logger.js';
+import { errorHandler } from './middleware/error-handler.js';
+import { getCircuitBreakerHealth } from './infrastructure/resilience.js';
 import { NeonAuthClient } from './modules/auth/neon-auth-client.js';
 import { SessionManager } from './modules/auth/session-manager.js';
 import { JWTManager } from './modules/auth/jwt-manager.js';
@@ -15,15 +18,38 @@ import { logoutRoutes } from './routes/auth/logout.js';
 import { switchOrgRoutes } from './routes/auth/switch-org.js';
 
 const fastify = Fastify({
-  logger: true
+  logger: {
+    level: process.env['LOG_LEVEL'] || 'info',
+    serializers: {
+      req: (req) => ({
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+      }),
+      res: (res) => ({
+        statusCode: res.statusCode,
+      }),
+    },
+  },
+  disableRequestLogging: true, // We'll handle request logging via middleware
 });
 
 // Register cookie support
 await fastify.register(import('@fastify/cookie'));
 
+// Register request correlation middleware
+fastify.addHook('onRequest', requestCorrelationMiddleware);
+
+// Register error handler
+fastify.setErrorHandler(errorHandler);
+
 // Initialize infrastructure
 const db = createDatabase();
 const cache = createCache();
+
+// Log infrastructure initialization
+infraLogger.databaseConnected();
+infraLogger.cacheConnected();
 
 import { CONFIG } from './config/index.js';
 
@@ -99,7 +125,7 @@ logoutRoutes(fastify, sessionManager, jwtCache, neonAuthService, logoutConfig);
 switchOrgRoutes(fastify, sessionManager, jwtCache, orgRepository, switchOrgConfig);
 
 // Health check endpoint
-fastify.get('/health', async (): Promise<{ status: string; service: string }> => {
+fastify.get('/health', async (request): Promise<{ status: string; service: string; circuit_breakers?: any }> => {
   try {
     // Test database connection with timeout
     const dbPromise = db.selectFrom('users').select('id').limit(1).execute();
@@ -115,9 +141,27 @@ fastify.get('/health', async (): Promise<{ status: string; service: string }> =>
       new Promise((_, reject) => setTimeout(() => reject(new Error('Cache timeout')), 3000))
     ]);
 
-    return { status: 'healthy', service: 'identity-service' };
+    request.log.debug({
+      message: 'Health check passed',
+      event_type: 'health_check_success',
+      timestamp: new Date().toISOString(),
+    });
+
+    // Include circuit breaker status in health response
+    const circuitBreakerHealth = getCircuitBreakerHealth();
+
+    return { 
+      status: 'healthy', 
+      service: 'identity-service',
+      circuit_breakers: circuitBreakerHealth,
+    };
   } catch (error) {
-    fastify.log.error(error, 'Health check failed');
+    request.log.error({
+      message: 'Health check failed',
+      event_type: 'health_check_failed',
+      error: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString(),
+    });
     throw new Error('Service unhealthy');
   }
 });
@@ -140,9 +184,19 @@ const start = async (): Promise<void> => {
   try {
     const PORT = process.env['PORT'] || 3000;
     await fastify.listen({ port: Number(PORT), host: '0.0.0.0' });
-    console.log(`Identity Service running on port ${PORT}`);
+    logger.info({
+      message: 'Identity Service started successfully',
+      event_type: 'service_started',
+      port: Number(PORT),
+      timestamp: new Date().toISOString(),
+    });
   } catch (err) {
-    fastify.log.error(err);
+    logger.error({
+      message: 'Failed to start Identity Service',
+      event_type: 'service_start_failed',
+      error: err instanceof Error ? err.message : String(err),
+      timestamp: new Date().toISOString(),
+    });
     process.exit(1);
   }
 };
