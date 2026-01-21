@@ -12,6 +12,7 @@ import {
   NeonAuthEndpoints,
   NEON_AUTH_PROVIDERS,
 } from '../types/neon-auth.js';
+import { CONFIG } from './index.js';
 
 // ============================================================================
 // Default Configuration Values
@@ -115,8 +116,7 @@ export class NeonAuthConfigManager {
     
     return {
       NEON_AUTH_URL: process.env['NEON_AUTH_URL'] || 'https://ep-late-cherry-afaerbwj.neonauth.c-2.us-west-2.aws.neon.tech/neondb/auth',
-      NEON_AUTH_SECRET: process.env['NEON_AUTH_SECRET'] || '',
-      NEON_AUTH_REDIRECT_URI: process.env['NEON_AUTH_REDIRECT_URI'] || 'http://localhost:3000/auth/callback',
+      NEON_AUTH_REDIRECT_URI: CONFIG.NEON_AUTH_REDIRECT_URI as string,
       ALLOWED_REDIRECT_URIS: allowedUris,
       NEON_AUTH_TIMEOUT: parseInt(process.env['NEON_AUTH_TIMEOUT'] || String(DEFAULT_NEON_AUTH_CONFIG.timeout), 10),
       NEON_AUTH_RETRY_ATTEMPTS: parseInt(process.env['NEON_AUTH_RETRY_ATTEMPTS'] || String(DEFAULT_NEON_AUTH_CONFIG.retryAttempts), 10),
@@ -126,7 +126,6 @@ export class NeonAuthConfigManager {
   private buildConfig(): NeonAuthConfig {
     return {
       baseURL: this.environmentConfig.NEON_AUTH_URL,
-      secret: this.environmentConfig.NEON_AUTH_SECRET,
       redirectUri: this.environmentConfig.NEON_AUTH_REDIRECT_URI,
     };
   }
@@ -137,10 +136,6 @@ export class NeonAuthConfigManager {
     // Validate required fields
     if (!this.config.baseURL) {
       errors.push('NEON_AUTH_URL is required');
-    }
-
-    if (!this.config.secret) {
-      errors.push('NEON_AUTH_SECRET is required');
     }
 
     if (!this.config.redirectUri) {

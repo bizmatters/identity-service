@@ -25,24 +25,25 @@ await fastify.register(import('@fastify/cookie'));
 const db = createDatabase();
 const cache = createCache();
 
+import { CONFIG } from './config/index.js';
+
 // Initialize services
 const neonAuthClient = new NeonAuthClient({
-  baseURL: process.env['NEON_AUTH_URL'] || 'https://ep-late-cherry-afaerbwj.neonauth.c-2.us-west-2.aws.neon.tech/neondb/auth',
-  secret: process.env['NEON_AUTH_SECRET'] || '',
-  redirectUri: process.env['NEON_AUTH_REDIRECT_URI'] || 'http://localhost:3000/auth/callback',
+  baseURL: process.env['NEON_AUTH_URL']!,
+  redirectUri: CONFIG.NEON_AUTH_REDIRECT_URI,
 });
 
 const sessionManager = new SessionManager(cache, {
-  sessionTTL: parseInt(process.env['SESSION_TTL'] || '86400'),
-  absoluteTTL: parseInt(process.env['SESSION_ABSOLUTE_TTL'] || '604800'),
-  cookieName: process.env['SESSION_COOKIE_NAME'] || '__Host-platform_session',
+  sessionTTL: CONFIG.SESSION_TTL,
+  absoluteTTL: CONFIG.SESSION_ABSOLUTE_TTL,
+  cookieName: CONFIG.SESSION_COOKIE_NAME,
 });
 
 const jwtManager = new JWTManager({
-  privateKey: process.env['JWT_PRIVATE_KEY'] || '',
-  publicKey: process.env['JWT_PUBLIC_KEY'] || '',
-  keyId: process.env['JWT_KEY_ID'] || 'default',
-  expiration: process.env['JWT_EXPIRATION'] || '10m',
+  privateKey: process.env['JWT_PRIVATE_KEY']!,
+  publicKey: process.env['JWT_PUBLIC_KEY']!,
+  keyId: process.env['JWT_KEY_ID'] || CONFIG.JWT_KEY_ID_DEFAULT,
+  expiration: CONFIG.JWT_EXPIRATION,
   ...(process.env['JWT_PREVIOUS_PRIVATE_KEY'] && {
     previousPrivateKey: process.env['JWT_PREVIOUS_PRIVATE_KEY'],
   }),
@@ -61,9 +62,8 @@ const orgRepository = new OrgRepository(db);
 
 const neonAuthService = new NeonAuthService(
   {
-    baseURL: process.env['NEON_AUTH_URL'] || 'https://ep-late-cherry-afaerbwj.neonauth.c-2.us-west-2.aws.neon.tech/neondb/auth',
-    secret: process.env['NEON_AUTH_SECRET'] || '',
-    redirectUri: process.env['NEON_AUTH_REDIRECT_URI'] || 'http://localhost:3000/auth/callback',
+    baseURL: process.env['NEON_AUTH_URL']!,
+    redirectUri: CONFIG.NEON_AUTH_REDIRECT_URI,
   },
   userRepository,
   orgRepository
@@ -71,24 +71,25 @@ const neonAuthService = new NeonAuthService(
 
 // Configuration
 const loginConfig = {
-  allowedRedirectUris: (process.env['ALLOWED_REDIRECT_URIS'] || 'http://localhost:3000/dashboard').split(','),
-  defaultRedirectUri: process.env['DEFAULT_REDIRECT_URI'] || 'http://localhost:3000/dashboard',
+  allowedRedirectUris: [...CONFIG.ALLOWED_REDIRECT_URIS],
+  defaultRedirectUri: CONFIG.DEFAULT_REDIRECT_URI,
+  neonAuthClientId: CONFIG.NEON_AUTH_CLIENT_ID,
 };
 
 const callbackConfig = {
-  allowedRedirectUris: (process.env['ALLOWED_REDIRECT_URIS'] || 'http://localhost:3000/dashboard').split(','),
-  defaultRedirectUri: process.env['DEFAULT_REDIRECT_URI'] || 'http://localhost:3000/dashboard',
-  cookieDomain: process.env['COOKIE_DOMAIN'] || '',
+  allowedRedirectUris: [...CONFIG.ALLOWED_REDIRECT_URIS],
+  defaultRedirectUri: CONFIG.DEFAULT_REDIRECT_URI,
+  cookieDomain: CONFIG.COOKIE_DOMAIN,
   cookieSecure: process.env['NODE_ENV'] === 'production',
 };
 
 const logoutConfig = {
-  cookieName: process.env['SESSION_COOKIE_NAME'] || '__Host-platform_session',
+  cookieName: CONFIG.SESSION_COOKIE_NAME,
   cookieSecure: process.env['NODE_ENV'] === 'production',
 };
 
 const switchOrgConfig = {
-  cookieName: process.env['SESSION_COOKIE_NAME'] || '__Host-platform_session',
+  cookieName: CONFIG.SESSION_COOKIE_NAME,
 };
 
 // Register routes
@@ -100,12 +101,20 @@ switchOrgRoutes(fastify, sessionManager, jwtCache, orgRepository, switchOrgConfi
 // Health check endpoint
 fastify.get('/health', async (): Promise<{ status: string; service: string }> => {
   try {
-    // Test database connection
-    await db.selectFrom('users').select('id').limit(1).execute();
-    
-    // Test cache connection
-    await cache.ping();
-    
+    // Test database connection with timeout
+    const dbPromise = db.selectFrom('users').select('id').limit(1).execute();
+    await Promise.race([
+      dbPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Database timeout')), 5000))
+    ]);
+
+    // Test cache connection with timeout
+    const cachePromise = cache.ping();
+    await Promise.race([
+      cachePromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Cache timeout')), 3000))
+    ]);
+
     return { status: 'healthy', service: 'identity-service' };
   } catch (error) {
     fastify.log.error(error, 'Health check failed');
@@ -120,7 +129,7 @@ fastify.get('/ready', (): { status: string; service: string } => {
 
 // Basic info endpoint
 fastify.get('/', (): { service: string; version: string; status: string } => {
-  return { 
+  return {
     service: 'identity-service',
     version: '1.0.0',
     status: 'running'

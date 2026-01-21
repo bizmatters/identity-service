@@ -227,7 +227,7 @@ async function validateServiceIdentity(
   // Method 4: Internal network without additional auth (least secure)
   // Only allow for development/testing
   if (process.env['NODE_ENV'] === 'development' && isInternalIP(request.ip)) {
-    fastify.log.warn({
+    void fastify.log.warn({
       ip: request.ip,
       serviceId: request.body.serviceId,
     }, 'Allowing service token request from internal network without authentication (development mode)');

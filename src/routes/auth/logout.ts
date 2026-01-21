@@ -50,11 +50,11 @@ export function logoutRoutes(
         await neonAuthService.terminateSession();
       } catch (error) {
         // Don't fail logout if Neon Auth termination fails
-        fastify.log.warn({ error }, 'Failed to terminate Neon Auth session');
+        void fastify.log.warn({ error }, 'Failed to terminate Neon Auth session');
       }
 
       // Clear session cookie
-      reply.clearCookie(config.cookieName, {
+      void reply.clearCookie(config.cookieName, {
         path: '/',
         secure: config.cookieSecure,
         httpOnly: true,
@@ -69,7 +69,7 @@ export function logoutRoutes(
       fastify.log.error({ error }, 'Logout failed');
       
       // Still clear the cookie even if cleanup failed
-      reply.clearCookie(config.cookieName, {
+      void reply.clearCookie(config.cookieName, {
         path: '/',
         secure: config.cookieSecure,
         httpOnly: true,

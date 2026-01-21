@@ -4,6 +4,7 @@ import { NeonAuthClient } from '../../modules/auth/neon-auth-client.js';
 import { SessionManager } from '../../modules/auth/session-manager.js';
 import { UserRepository } from '../../modules/user/user-repository.js';
 import { OrgRepository } from '../../modules/org/org-repository.js';
+import { CONFIG } from '../../config/index.js';
 
 const LoginQuerySchema = Type.Object({
   redirect_uri: Type.Optional(Type.String()),
@@ -16,14 +17,15 @@ type LoginQuery = {
 interface LoginConfig {
   allowedRedirectUris: string[];
   defaultRedirectUri: string;
+  neonAuthClientId: string;
 }
 
 export function loginRoutes(
   fastify: FastifyInstance,
-  neonAuthClient: NeonAuthClient,
-  sessionManager: SessionManager,
-  userRepository: UserRepository,
-  orgRepository: OrgRepository,
+  _neonAuthClient: NeonAuthClient,
+  _sessionManager: SessionManager,
+  _userRepository: UserRepository,
+  _orgRepository: OrgRepository,
   config: LoginConfig
 ): void {
   /**
@@ -77,57 +79,20 @@ export function loginRoutes(
       }
 
       try {
-        const callbackURL = `${process.env['NEON_AUTH_REDIRECT_URI']}${redirect_uri ? `?redirect_uri=${encodeURIComponent(redirect_uri)}` : ''}`;
+        const callbackURL = `${CONFIG.NEON_AUTH_REDIRECT_URI}${redirect_uri ? `?redirect_uri=${encodeURIComponent(redirect_uri)}` : ''}`;
 
-        // Initiate OAuth flow via Neon Auth
-        const authResult = await neonAuthClient.signInWithSocial('google', callbackURL);
+        // For server-side OAuth, construct the authorization URL manually
+        // The Neon Auth SDK is designed for client-side use
+        const authorizationUrl = `${process.env['NEON_AUTH_URL']}/oauth2/auth?` + 
+          `client_id=${encodeURIComponent(config.neonAuthClientId)}&` +
+          `response_type=code&` +
+          `redirect_uri=${encodeURIComponent(callbackURL)}&` +
+          `scope=${encodeURIComponent('openid offline offline_access')}&` +
+          `state=${encodeURIComponent(Math.random().toString(36))}&` +
+          `provider=google`;
 
-        if (authResult.redirect && authResult.url) {
-          // Redirect to Neon Auth OAuth URL
-          return reply.redirect(302, authResult.url);
-        } else if (authResult.session && authResult.user) {
-          // Direct session creation (shouldn't happen with OAuth but handle gracefully)
-          
-          // JIT provision user
-          const user = await userRepository.createUserAtomic(
-            authResult.user.id,
-            authResult.user.email,
-            '' // Will be set after org creation
-          );
-
-          if (!user) {
-            throw new Error('Failed to create user');
-          }
-
-          // Get or create default organization
-          let orgId = user.default_org_id;
-          if (!orgId) {
-            const org = await orgRepository.createOrganization(
-              `${authResult.user.name || authResult.user.email}'s Organization`,
-              `org-${user.id.substring(0, 8)}`,
-              user.id
-            );
-            orgId = org.id;
-          }
-
-          // Create platform session
-          const sessionId = await sessionManager.createSession(user.id, orgId, 'owner');
-
-          // Set secure cookie
-          reply.setCookie('__Host-platform_session', sessionId, {
-            path: '/',
-            secure: process.env['NODE_ENV'] === 'production',
-            httpOnly: true,
-            sameSite: 'lax',
-            maxAge: 24 * 60 * 60, // 24 hours
-          });
-
-          // Redirect to dashboard or specified redirect_uri
-          const finalRedirectUri = redirect_uri || config.defaultRedirectUri;
-          return reply.redirect(302, finalRedirectUri);
-        } else {
-          throw new Error('Invalid auth result from Neon Auth');
-        }
+        // Redirect to Neon Auth OAuth URL
+        return reply.redirect(authorizationUrl);
       } catch (error) {
         fastify.log.error({ error }, 'Google OAuth initiation failed');
         return reply.status(500).send({

@@ -1,36 +1,23 @@
 import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import { Database } from '../types/database.js';
+import { CONFIG } from '../config/index.js';
 
 export function createDatabase(): Kysely<Database> {
-  // Check for explicit DATABASE_URL first
-  let connectionString = process.env['DATABASE_URL'];
-  
-  // Build from individual environment variables if DATABASE_URL not provided
-  if (!connectionString) {
-    const host = process.env['POSTGRES_HOST'];
-    const port = process.env['POSTGRES_PORT'] || '5432';
-    const user = process.env['POSTGRES_USER'];
-    const password = process.env['POSTGRES_PASSWORD'];
-    const dbname = process.env['POSTGRES_DB'];
-    
-    if (host && user && password && dbname) {
-      connectionString = `postgresql://${user}:${password}@${host}:${port}/${dbname}`;
-      console.log(`Built connection string from env vars: postgresql://${user}:***@${host}:${port}/${dbname}`);
-    }
-  } else {
-    console.log(`Using DATABASE_URL: ${connectionString.replace(/:[^:@]*@/, ':***@')}`);
-  }
+  // Use DATABASE_URL (external Neon) only
+  const connectionString = process.env['DATABASE_URL'];
   
   if (!connectionString) {
-    throw new Error('DATABASE_URL environment variable or POSTGRES_* variables are required');
+    throw new Error('DATABASE_URL environment variable is required');
   }
+
+  console.log(`Using DATABASE_URL: ${connectionString.replace(/:[^:@]*@/, ':***@')}`);
 
   const poolConfig = {
     connectionString,
-    max: parseInt(process.env['DB_POOL_MAX'] || '3', 10),
-    idleTimeoutMillis: parseInt(process.env['DB_POOL_IDLE_TIMEOUT'] || '10000', 10),
-    connectionTimeoutMillis: parseInt(process.env['DB_POOL_CONNECTION_TIMEOUT'] || '5000', 10),
+    max: CONFIG.DB_POOL_MAX,
+    idleTimeoutMillis: CONFIG.DB_POOL_IDLE_TIMEOUT,
+    connectionTimeoutMillis: CONFIG.DB_POOL_CONNECTION_TIMEOUT,
   };
 
   const pool = new Pool(poolConfig);

@@ -58,7 +58,7 @@ export async function jwksRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.get('/jwks.json', async (_request: FastifyRequest, reply: FastifyReply) => {
     // Redirect to the standard path
-    return reply.redirect(301, '/.well-known/jwks.json');
+    return reply.redirect('/.well-known/jwks.json', 301);
   });
 
   /**

@@ -108,7 +108,7 @@ export function callbackRoutes(
         };
 
         // __Host- prefix requires no domain
-        reply.setCookie('__Host-platform_session', sessionId, cookieOptions);
+        void reply.setCookie('__Host-platform_session', sessionId, cookieOptions);
 
         // Log successful authentication for audit
         void fastify.log.info({
@@ -121,7 +121,7 @@ export function callbackRoutes(
 
         // Redirect to dashboard or specified redirect_uri
         const finalRedirectUri = redirect_uri || config.defaultRedirectUri;
-        return reply.redirect(302, finalRedirectUri);
+        return reply.redirect(finalRedirectUri, 302);
 
       } catch (error) {
         fastify.log.error({ error, query: request.query }, 'Callback handling failed');

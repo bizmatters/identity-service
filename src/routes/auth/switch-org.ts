@@ -75,7 +75,7 @@ export function switchOrgRoutes(
         await jwtCache.invalidate(sessionId);
 
         // Log organization switch for audit
-        fastify.log.info({
+        void fastify.log.info({
           userId: sessionData.user_id,
           fromOrgId: sessionData.org_id,
           toOrgId: org_id,

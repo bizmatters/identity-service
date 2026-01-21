@@ -12,7 +12,6 @@
 
 export interface NeonAuthConfig {
   baseURL: string;
-  secret: string;
   redirectUri: string;
 }
 
@@ -167,9 +166,7 @@ export interface INeonAuthService {
 // ============================================================================
 
 export const NEON_AUTH_PROVIDERS = {
-  GOOGLE: 'google',
-  GITHUB: 'github',
-  MICROSOFT: 'microsoft',
+  GOOGLE: 'google'
 } as const;
 
 export type NeonAuthProvider = typeof NEON_AUTH_PROVIDERS[keyof typeof NEON_AUTH_PROVIDERS];
@@ -205,7 +202,6 @@ export interface NeonAuthMetrics {
 
 export interface NeonAuthEnvironmentConfig {
   NEON_AUTH_URL: string;
-  NEON_AUTH_SECRET: string;
   NEON_AUTH_REDIRECT_URI: string;
   ALLOWED_REDIRECT_URIS: string[];
   NEON_AUTH_TIMEOUT: number;
