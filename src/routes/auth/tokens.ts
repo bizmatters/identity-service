@@ -1,292 +1,237 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { Type } from '@sinclair/typebox';
+import { SessionManager } from '../../modules/auth/session-manager.js';
+import { TokenManager } from '../../modules/auth/token-manager.js';
+import { TokenRepository } from '../../modules/token/token-repository.js';
 
 const CreateTokenSchema = Type.Object({
   description: Type.String({ minLength: 1, maxLength: 255 }),
   expiresAt: Type.Optional(Type.String({ format: 'date-time' })),
 });
 
-const TokenResponseSchema = Type.Object({
-  tokenId: Type.String(),
-  token: Type.String(),
-  description: Type.String(),
-  expiresAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
-  createdAt: Type.String({ format: 'date-time' }),
+const DeleteTokenParamsSchema = Type.Object({
+  id: Type.String({ format: 'uuid' }),
 });
 
-export async function tokenRoutes(fastify: FastifyInstance): Promise<void> {
-  // Get dependencies from Fastify context
-  const tokenManager = fastify.tokenManager;
-  const validationService = fastify.validationService;
+type CreateTokenBody = {
+  description: string;
+  expiresAt?: string;
+};
 
+type DeleteTokenParams = {
+  id: string;
+};
+
+export function tokenRoutes(
+  fastify: FastifyInstance,
+  sessionManager: SessionManager,
+  tokenManager: TokenManager,
+  tokenRepository: TokenRepository
+): void {
   /**
-   * Create API Token endpoint
-   * Requirements: 4.2, 4.3, 4.4, 4.5
+   * Create API token
+   * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
    */
-  fastify.post('/auth/tokens', {
-    schema: {
-      body: CreateTokenSchema,
-      response: {
-        201: TokenResponseSchema,
-        401: Type.Object({
-          error: Type.String(),
-          code: Type.String(),
-        }),
-        400: Type.Object({
-          error: Type.String(),
-          code: Type.String(),
-        }),
+  fastify.post<{ Body: CreateTokenBody }>(
+    '/auth/tokens',
+    {
+      schema: {
+        body: CreateTokenSchema,
       },
     },
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      // Require valid session cookie
-      const cookieHeader = request.headers.cookie;
-      if (!cookieHeader) {
-        return reply.status(401).send({
-          error: 'Authentication required',
-          code: 'NO_SESSION',
-        });
-      }
-
-      const sessionId = extractSessionFromCookie(cookieHeader);
-      if (!sessionId) {
-        return reply.status(401).send({
-          error: 'Invalid session cookie',
-          code: 'INVALID_SESSION',
-        });
-      }
-
-      // Validate session and get user context
-      const validation = await validationService.validateSession(sessionId);
-
-      // Parse optional expiration date
-      const requestBody = request.body as { expiresAt?: string; description: string };
-      let expiresAt: Date | undefined;
-      if (requestBody.expiresAt) {
-        expiresAt = new Date(requestBody.expiresAt);
-        
-        // Validate expiration is in the future
-        if (expiresAt <= new Date()) {
-          return reply.status(400).send({
-            error: 'Expiration date must be in the future',
-            code: 'INVALID_EXPIRATION',
+    async (request: FastifyRequest<{ Body: CreateTokenBody }>, reply: FastifyReply) => {
+      try {
+        // Extract session from cookie
+        const cookieHeader = request.headers.cookie;
+        if (!cookieHeader) {
+          return reply.status(401).send({
+            error: 'unauthorized',
+            message: 'Session required to create API token',
           });
         }
 
-        // Validate expiration is not too far in the future (max 1 year)
-        const maxExpiration = new Date();
-        maxExpiration.setFullYear(maxExpiration.getFullYear() + 1);
-        
-        if (expiresAt > maxExpiration) {
-          return reply.status(400).send({
-            error: 'Expiration date cannot be more than 1 year in the future',
-            code: 'EXPIRATION_TOO_FAR',
+        const sessionId = extractSessionFromCookie(cookieHeader);
+        if (!sessionId) {
+          return reply.status(401).send({
+            error: 'unauthorized',
+            message: 'Invalid session cookie',
           });
         }
-      }
 
-      // Create API token
-      const tokenResult = await tokenManager.createApiToken(
-        validation.userId,
-        validation.orgId,
-        requestBody.description,
-        expiresAt
-      );
+        // Validate session
+        const sessionData = await sessionManager.getSession(sessionId);
+        if (!sessionData) {
+          return reply.status(401).send({
+            error: 'unauthorized',
+            message: 'Invalid or expired session',
+          });
+        }
 
-      // Return token data (plaintext token returned only once)
-      return reply.status(201).send({
-        tokenId: tokenResult.tokenId,
-        token: tokenResult.token, // This is the only time the plaintext token is returned
-        description: tokenResult.description,
-        expiresAt: tokenResult.expiresAt?.toISOString() || null,
-        createdAt: new Date().toISOString(),
-      });
+        // Parse expiration date if provided
+        let expiresAt: Date | undefined;
+        if (request.body.expiresAt) {
+          expiresAt = new Date(request.body.expiresAt);
+          if (isNaN(expiresAt.getTime())) {
+            return reply.status(400).send({
+              error: 'invalid_request',
+              message: 'Invalid expiresAt date format',
+            });
+          }
+        }
 
-    } catch (error) {
-      fastify.log.error(error, 'Token creation error');
-      
-      if (error instanceof Error && error.message.includes('Invalid or expired session')) {
-        return reply.status(401).send({
-          error: 'Session expired',
-          code: 'SESSION_EXPIRED',
+        // Create API token
+        const tokenResult = await tokenManager.createApiToken(
+          sessionData.user_id,
+          sessionData.org_id,
+          request.body.description,
+          expiresAt
+        );
+
+        return reply.status(201).send({
+          id: tokenResult.tokenId,
+          token: tokenResult.token,
+          description: tokenResult.description,
+          expiresAt: tokenResult.expiresAt,
+          message: 'Token created successfully. Save this token securely - it will not be shown again.',
+        });
+      } catch (error) {
+        fastify.log.error(error, 'Token creation failed');
+        return reply.status(500).send({
+          error: 'server_error',
+          message: 'Failed to create API token',
         });
       }
-
-      return reply.status(500).send({
-        error: 'Failed to create token',
-        code: 'TOKEN_CREATION_FAILED',
-      });
     }
-  });
+  );
 
   /**
-   * List user's API tokens (without plaintext values)
-   * Requirements: 4.4
+   * List user's API tokens
+   * Requirements: 4.14
    */
-  fastify.get('/auth/tokens', {
-    schema: {
-      response: {
-        200: Type.Object({
-          tokens: Type.Array(Type.Object({
-            tokenId: Type.String(),
-            description: Type.String(),
-            expiresAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
-            createdAt: Type.String({ format: 'date-time' }),
-            lastUsed: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
+  fastify.get(
+    '/auth/tokens',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        // Extract session from cookie
+        const cookieHeader = request.headers.cookie;
+        if (!cookieHeader) {
+          return reply.status(401).send({
+            error: 'unauthorized',
+            message: 'Session required to list API tokens',
+          });
+        }
+
+        const sessionId = extractSessionFromCookie(cookieHeader);
+        if (!sessionId) {
+          return reply.status(401).send({
+            error: 'unauthorized',
+            message: 'Invalid session cookie',
+          });
+        }
+
+        // Validate session
+        const sessionData = await sessionManager.getSession(sessionId);
+        if (!sessionData) {
+          return reply.status(401).send({
+            error: 'unauthorized',
+            message: 'Invalid or expired session',
+          });
+        }
+
+        // List tokens for current organization
+        const tokens = await tokenRepository.listUserTokens(
+          sessionData.user_id,
+          sessionData.org_id
+        );
+
+        return reply.status(200).send({
+          tokens: tokens.map(token => ({
+            id: token.id,
+            description: token.description,
+            expiresAt: token.expires_at,
+            createdAt: token.created_at,
+            lastUsedAt: token.last_used_at,
           })),
-        }),
-        401: Type.Object({
-          error: Type.String(),
-          code: Type.String(),
-        }),
-      },
-    },
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      // Require valid session cookie
-      const cookieHeader = request.headers.cookie;
-      if (!cookieHeader) {
-        return reply.status(401).send({
-          error: 'Authentication required',
-          code: 'NO_SESSION',
+        });
+      } catch (error) {
+        fastify.log.error(error, 'Token listing failed');
+        return reply.status(500).send({
+          error: 'server_error',
+          message: 'Failed to list API tokens',
         });
       }
-
-      const sessionId = extractSessionFromCookie(cookieHeader);
-      if (!sessionId) {
-        return reply.status(401).send({
-          error: 'Invalid session cookie',
-          code: 'INVALID_SESSION',
-        });
-      }
-
-      // Validate session and get user context
-      const validation = await validationService.validateSession(sessionId);
-
-      // List user's tokens for current organization
-      const tokenRepository = fastify.tokenRepository;
-      const tokens = await tokenRepository.listUserTokens(validation.userId, validation.orgId);
-
-      return reply.status(200).send({
-        tokens: tokens.map(token => ({
-          tokenId: token.id,
-          description: token.description,
-          expiresAt: token.expires_at?.toISOString() || null,
-          createdAt: token.created_at.toISOString(),
-          lastUsed: token.last_used_at?.toISOString() || null,
-        })),
-      });
-
-    } catch (error) {
-      fastify.log.error(error, 'Token listing error');
-      
-      if (error instanceof Error && error.message.includes('Invalid or expired session')) {
-        return reply.status(401).send({
-          error: 'Session expired',
-          code: 'SESSION_EXPIRED',
-        });
-      }
-
-      return reply.status(500).send({
-        error: 'Failed to list tokens',
-        code: 'TOKEN_LISTING_FAILED',
-      });
     }
-  });
+  );
 
   /**
    * Revoke API token
-   * Requirements: 4.4
+   * Requirements: 4.15
    */
-  fastify.delete('/auth/tokens/:tokenId', {
-    schema: {
-      params: Type.Object({
-        tokenId: Type.String(),
-      }),
-      response: {
-        200: Type.Object({
-          message: Type.String(),
-        }),
-        401: Type.Object({
-          error: Type.String(),
-          code: Type.String(),
-        }),
-        404: Type.Object({
-          error: Type.String(),
-          code: Type.String(),
-        }),
+  fastify.delete<{ Params: DeleteTokenParams }>(
+    '/auth/tokens/:id',
+    {
+      schema: {
+        params: DeleteTokenParamsSchema,
       },
     },
-  }, async (request: FastifyRequest<{ Params: { tokenId: string } }>, reply: FastifyReply) => {
-    try {
-      // Require valid session cookie
-      const cookieHeader = request.headers.cookie;
-      if (!cookieHeader) {
-        return reply.status(401).send({
-          error: 'Authentication required',
-          code: 'NO_SESSION',
+    async (request: FastifyRequest<{ Params: DeleteTokenParams }>, reply: FastifyReply) => {
+      try {
+        // Extract session from cookie
+        const cookieHeader = request.headers.cookie;
+        if (!cookieHeader) {
+          return reply.status(401).send({
+            error: 'unauthorized',
+            message: 'Session required to revoke API token',
+          });
+        }
+
+        const sessionId = extractSessionFromCookie(cookieHeader);
+        if (!sessionId) {
+          return reply.status(401).send({
+            error: 'unauthorized',
+            message: 'Invalid session cookie',
+          });
+        }
+
+        // Validate session
+        const sessionData = await sessionManager.getSession(sessionId);
+        if (!sessionData) {
+          return reply.status(401).send({
+            error: 'unauthorized',
+            message: 'Invalid or expired session',
+          });
+        }
+
+        // Verify token ownership and delete
+        const deleted = await tokenRepository.deleteUserToken(
+          request.params.id,
+          sessionData.user_id,
+          sessionData.org_id
+        );
+
+        if (!deleted) {
+          return reply.status(404).send({
+            error: 'not_found',
+            message: 'Token not found or does not belong to current organization',
+          });
+        }
+
+        return reply.status(200).send({
+          message: 'Token revoked successfully',
+        });
+      } catch (error) {
+        fastify.log.error(error, 'Token revocation failed');
+        return reply.status(500).send({
+          error: 'server_error',
+          message: 'Failed to revoke API token',
         });
       }
-
-      const sessionId = extractSessionFromCookie(cookieHeader);
-      if (!sessionId) {
-        return reply.status(401).send({
-          error: 'Invalid session cookie',
-          code: 'INVALID_SESSION',
-        });
-      }
-
-      // Validate session and get user context
-      const validation = await validationService.validateSession(sessionId);
-
-      // Check token ownership and revoke
-      const tokenRepository = fastify.tokenRepository;
-      const deleted = await tokenRepository.deleteUserToken(
-        request.params.tokenId,
-        validation.userId,
-        validation.orgId
-      );
-
-      if (!deleted) {
-        return reply.status(404).send({
-          error: 'Token not found or access denied',
-          code: 'TOKEN_NOT_FOUND',
-        });
-      }
-
-      return reply.status(200).send({
-        message: 'Token revoked successfully',
-      });
-
-    } catch (error) {
-      fastify.log.error(error, 'Token revocation error');
-      
-      if (error instanceof Error && error.message.includes('Invalid or expired session')) {
-        return reply.status(401).send({
-          error: 'Session expired',
-          code: 'SESSION_EXPIRED',
-        });
-      }
-
-      if (error instanceof Error && error.message.includes('not found')) {
-        return reply.status(404).send({
-          error: 'Token not found',
-          code: 'TOKEN_NOT_FOUND',
-        });
-      }
-
-      return reply.status(500).send({
-        error: 'Failed to revoke token',
-        code: 'TOKEN_REVOCATION_FAILED',
-      });
     }
-  });
+  );
 }
 
 /**
  * Extract session ID from cookie header
- * Looks for __Host-platform_session cookie
  */
 function extractSessionFromCookie(cookieHeader: string): string | null {
   const cookies = cookieHeader.split(';').map(c => c.trim());

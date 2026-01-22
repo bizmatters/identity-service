@@ -71,6 +71,7 @@ describe('Neon Auth Endpoints Integration Test', () => {
     const loginConfig = {
       allowedRedirectUris: ['http://localhost:3000/dashboard'],
       defaultRedirectUri: 'http://localhost:3000/dashboard',
+      neonAuthClientId: 'test-client-id',
     };
 
     const callbackConfig = {
@@ -137,7 +138,11 @@ describe('Neon Auth Endpoints Integration Test', () => {
       });
 
       expect(response.statusCode).toBe(302);
-      expect(response.headers.location).toContain('accounts.google.com');
+      // Neon Auth acts as intermediary - redirects to Neon Auth OAuth endpoint
+      expect(response.headers.location).toContain('neonauth');
+      expect(response.headers.location).toContain('oauth2/auth');
+      expect(response.headers.location).toContain('provider=google');
+      expect(response.headers.location).toContain('client_id=test-client-id');
       expect(response.headers.location).toContain('redirect_uri=');
     });
   });
@@ -284,7 +289,9 @@ describe('Neon Auth Endpoints Integration Test', () => {
         url: '/auth/login/google',
       });
       expect(oauthResponse.statusCode).toBe(302);
-      expect(oauthResponse.headers.location).toContain('accounts.google.com');
+      // Neon Auth intermediary - not direct Google redirect
+      expect(oauthResponse.headers.location).toContain('neonauth');
+      expect(oauthResponse.headers.location).toContain('provider=google');
 
       // Step 3: Handle callback
       const callbackResponse = await app.inject({

@@ -1,8 +1,0 @@
-{
-  "access_token": "test-access-token-placeholder",
-  "id_token": "test-id-token-placeholder",
-  "refresh_token": "test-refresh-token-placeholder",
-  "token_type": "Bearer",
-  "expires_in": 3600,
-  "scope": "openid email profile"
-}

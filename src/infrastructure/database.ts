@@ -3,7 +3,6 @@ import { Pool } from 'pg';
 import { Database } from '../types/database.js';
 import { CONFIG } from '../config/index.js';
 import { infraLogger } from './logger.js';
-import { resilientOperations } from './resilience.js';
 
 export function createDatabase(): Kysely<Database> {
   // Use DATABASE_URL (external Neon) only
@@ -33,10 +32,7 @@ export function createDatabase(): Kysely<Database> {
 // Health check
 export async function checkDatabaseHealth(db: Kysely<Database>): Promise<boolean> {
   try {
-    // Use resilient database operation for health check
-    await resilientOperations.databaseCall(async () => {
-      return db.selectFrom('users').select('id').limit(1).execute();
-    }, 'health_check');
+    await db.selectFrom('users').select('id').limit(1).execute();
     return true;
   } catch (error) {
     infraLogger.databaseError(error instanceof Error ? error : new Error(String(error)), 'health_check');

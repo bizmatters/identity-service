@@ -1,5 +1,11 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { ValidationError } from '../../modules/auth/validation-service.js';
+
+class ValidationError extends Error {
+  constructor(message: string, public statusCode: number = 401) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
 
 export async function validateRoutes(fastify: FastifyInstance): Promise<void> {
   // Get dependencies from Fastify context
@@ -10,8 +16,14 @@ export async function validateRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * HTTP extAuthz endpoint for AgentGateway
    * Requirements: 2.1, 2.2, 2.3, 2.11, 4.6, 4.7, 4.12, 4.13, 8.1
+   * 
+   * STABLE FIX: Use .all() to accept any HTTP method (GET, POST, PUT, DELETE, etc.)
+   * AgentGateway HTTP extAuthz forwards the original client request method to this endpoint.
+   * The Trust Broker pattern is method-agnostic - we validate WHO is calling, not WHAT they're calling.
    */
-  fastify.post('/internal/validate', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.all('/internal/validate', {
+    // No body schema validation - we only check headers regardless of HTTP method
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       let validationResult;
       let sessionId: string | null = null;
@@ -79,6 +91,7 @@ export async function validateRoutes(fastify: FastifyInstance): Promise<void> {
           'Authorization': `Bearer ${platformJWT}`,
           'X-Auth-User-Id': validationResult.userId,
           'X-Auth-Org-Id': validationResult.orgId,
+          'X-Auth-Role': validationResult.role,
         })
         .send({ 
           status: 'authorized',

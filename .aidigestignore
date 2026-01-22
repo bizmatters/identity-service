@@ -1,0 +1,7 @@
+dist
+tests
+zerotouch-platform
+.env
+package-lock.json
+platform
+node_modules
