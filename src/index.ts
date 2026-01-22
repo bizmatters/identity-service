@@ -1,4 +1,5 @@
 // Identity Service entry point
+import 'dotenv/config';
 import Fastify from 'fastify';
 import { createDatabase } from './infrastructure/database.js';
 import { createCache } from './infrastructure/cache.js';
@@ -16,6 +17,7 @@ import { loginRoutes } from './routes/auth/login.js';
 import { callbackRoutes } from './routes/auth/callback.js';
 import { logoutRoutes } from './routes/auth/logout.js';
 import { switchOrgRoutes } from './routes/auth/switch-org.js';
+import { testSessionRoutes } from './routes/auth/test-session.js';
 
 const fastify = Fastify({
   logger: {
@@ -118,11 +120,16 @@ const switchOrgConfig = {
   cookieName: CONFIG.SESSION_COOKIE_NAME,
 };
 
+const testSessionConfig = {
+  cookieSecure: process.env['NODE_ENV'] === 'production',
+};
+
 // Register routes
 loginRoutes(fastify, neonAuthClient, sessionManager, userRepository, orgRepository, loginConfig);
 callbackRoutes(fastify, neonAuthService, sessionManager, jwtManager, jwtCache, callbackConfig);
 logoutRoutes(fastify, sessionManager, jwtCache, neonAuthService, logoutConfig);
 switchOrgRoutes(fastify, sessionManager, jwtCache, orgRepository, switchOrgConfig);
+testSessionRoutes(fastify, sessionManager, userRepository, orgRepository, testSessionConfig);
 
 // Health check endpoint
 fastify.get('/health', async (request): Promise<{ status: string; service: string; circuit_breakers?: any }> => {

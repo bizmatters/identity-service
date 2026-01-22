@@ -48,4 +48,5 @@ export interface ApiTokenTable {
   description: string;
   expires_at: Date | null;
   created_at: Generated<Date>;
+  last_used_at: Date | null;
 }

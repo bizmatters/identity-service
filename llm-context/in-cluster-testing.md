@@ -41,7 +41,7 @@ kubectl run integration-test-oidc --image=identity-service:ci-test --rm -i --res
   }
 }'
 
-### Use this command when all env.var in-cluster ES do not exist and you want to pass them as env.var and valiate before creating the ES
+### Use this command when all env.var in-cluster ES do not exist and you want to pass them as .env file or sources and valiate before creating the ES
 
 kubectl run integration-test-oidc --image=identity-service:ci-test --rm -i --restart=Never -n platform-identity --overrides='
 {
@@ -75,3 +75,7 @@ kubectl port-forward -n platform-identity svc/identity-service 3000:3000 &
 curl -s http://localhost:3000/auth/login
 curl -s "http://localhost:3000/auth/login?redirect_uri=https://localhost:3000"
  
+ curl -s http://local
+host:3000/auth/test-session -X POST -H "Content-Type: application/json" -
+d '{"external_id":"test","email":"test@example.com","organization_name":"
+Test Org"}'
