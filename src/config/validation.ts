@@ -6,9 +6,11 @@ const EnvConfigSchema = Type.Object({
   // Required - Database
   DATABASE_URL: Type.String({ minLength: 1 }),
   
-  // Required - Cache
-  REDIS_HOST: Type.String({ minLength: 1 }),
-  REDIS_PORT: Type.String({ pattern: '^[0-9]+$' }),
+  // Required - Cache (either REDIS_* or DRAGONFLY_* keys)
+  REDIS_HOST: Type.Optional(Type.String({ minLength: 1 })),
+  REDIS_PORT: Type.Optional(Type.String({ pattern: '^[0-9]+$' })),
+  DRAGONFLY_HOST: Type.Optional(Type.String({ minLength: 1 })),
+  DRAGONFLY_PORT: Type.Optional(Type.String({ pattern: '^[0-9]+$' })),
   
   // Required - Neon Auth
   NEON_AUTH_URL: Type.String({ minLength: 1 }),
@@ -38,6 +40,8 @@ const EnvConfigSchema = Type.Object({
   PORT: Type.Optional(Type.String()),
   REDIS_USERNAME: Type.Optional(Type.String()),
   REDIS_PASSWORD: Type.Optional(Type.String()),
+  DRAGONFLY_USERNAME: Type.Optional(Type.String()),
+  DRAGONFLY_PASSWORD: Type.Optional(Type.String()),
   NEON_AUTH_REDIRECT_URI: Type.Optional(Type.String()),
   ALLOWED_REDIRECT_URIS: Type.Optional(Type.String()),
 });
@@ -51,6 +55,8 @@ export function validateEnvironmentConfig(): void {
     DATABASE_URL: process.env['DATABASE_URL'],
     REDIS_HOST: process.env['REDIS_HOST'],
     REDIS_PORT: process.env['REDIS_PORT'],
+    DRAGONFLY_HOST: process.env['DRAGONFLY_HOST'],
+    DRAGONFLY_PORT: process.env['DRAGONFLY_PORT'],
     NEON_AUTH_URL: process.env['NEON_AUTH_URL'],
     JWT_PRIVATE_KEY: process.env['JWT_PRIVATE_KEY'],
     JWT_PUBLIC_KEY: process.env['JWT_PUBLIC_KEY'],
@@ -72,6 +78,8 @@ export function validateEnvironmentConfig(): void {
     PORT: process.env['PORT'],
     REDIS_USERNAME: process.env['REDIS_USERNAME'],
     REDIS_PASSWORD: process.env['REDIS_PASSWORD'],
+    DRAGONFLY_USERNAME: process.env['DRAGONFLY_USERNAME'],
+    DRAGONFLY_PASSWORD: process.env['DRAGONFLY_PASSWORD'],
     NEON_AUTH_REDIRECT_URI: process.env['NEON_AUTH_REDIRECT_URI'],
     ALLOWED_REDIRECT_URIS: process.env['ALLOWED_REDIRECT_URIS'],
   };
@@ -90,14 +98,23 @@ export function validateEnvironmentConfig(): void {
     console.error(errorMessages.join('\n'));
     console.error('\nRequired environment variables:');
     console.error('  - DATABASE_URL');
-    console.error('  - REDIS_HOST');
-    console.error('  - REDIS_PORT');
+    console.error('  - REDIS_HOST + REDIS_PORT (or DRAGONFLY_HOST + DRAGONFLY_PORT)');
     console.error('  - NEON_AUTH_URL');
     console.error('  - JWT_PRIVATE_KEY');
     console.error('  - JWT_PUBLIC_KEY');
     console.error('  - JWT_KEY_ID');
     console.error('  - TOKEN_PEPPER');
     
+    process.exit(1);
+  }
+
+  // Additional validation: ensure at least one cache config is present
+  const hasRedisConfig = config.REDIS_HOST && config.REDIS_PORT;
+  const hasDragonflyConfig = config.DRAGONFLY_HOST && config.DRAGONFLY_PORT;
+  
+  if (!hasRedisConfig && !hasDragonflyConfig) {
+    console.error('❌ Cache configuration validation failed:');
+    console.error('  Either REDIS_HOST + REDIS_PORT or DRAGONFLY_HOST + DRAGONFLY_PORT must be provided');
     process.exit(1);
   }
 
