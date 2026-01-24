@@ -36,14 +36,19 @@ export class ValidationService {
       throw new ValidationError('Invalid or expired session', 401);
     }
 
+    console.log(`[DEBUG] Session data retrieved: userId=${sessionData.user_id}, orgId=${sessionData.org_id}`);
+
     // Update last accessed time (sliding expiration)
     await this.sessionManager.updateLastAccessed(sessionId);
 
     // Get user role with permission cache (P1)
+    console.log(`[DEBUG] Getting permission for user=${sessionData.user_id}, org=${sessionData.org_id}`);
     const permission = await this.getPermissionWithCache(
       sessionData.user_id,
       sessionData.org_id
     );
+
+    console.log(`[DEBUG] Permission retrieved: role=${permission.role}, version=${permission.version}`);
 
     return {
       userId: sessionData.user_id,

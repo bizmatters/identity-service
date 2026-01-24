@@ -66,6 +66,16 @@ fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, b
   }
 });
 
+// Add global request logging hook
+fastify.addHook('onRequest', async (request, reply) => {
+  request.log.info({
+    method: request.method,
+    url: request.url,
+    headers: Object.keys(request.headers),
+    ip: request.ip
+  }, 'Incoming request');
+});
+
 // Register cookie support
 await fastify.register(import('@fastify/cookie'));
 

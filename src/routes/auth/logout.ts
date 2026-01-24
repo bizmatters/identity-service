@@ -53,12 +53,13 @@ export function logoutRoutes(
         void fastify.log.warn({ error }, 'Failed to terminate Neon Auth session');
       }
 
-      // Clear session cookie
-      void reply.clearCookie(config.cookieName, {
+      // Clear session cookie with Max-Age=0
+      void reply.setCookie(config.cookieName, '', {
         path: '/',
         secure: config.cookieSecure,
         httpOnly: true,
         sameSite: 'lax',
+        maxAge: 0, // This sets Max-Age=0 in the header
       });
 
       return reply.status(200).send({
@@ -69,11 +70,12 @@ export function logoutRoutes(
       fastify.log.error({ error }, 'Logout failed');
       
       // Still clear the cookie even if cleanup failed
-      void reply.clearCookie(config.cookieName, {
+      void reply.setCookie(config.cookieName, '', {
         path: '/',
         secure: config.cookieSecure,
         httpOnly: true,
         sameSite: 'lax',
+        maxAge: 0, // This sets Max-Age=0 in the header
       });
 
       return reply.status(500).send({

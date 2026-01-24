@@ -6,6 +6,10 @@ kubectl delete pod -n platform-identity -l app=identity-service
 kubectl get deployment identity-service -n platform-identity -o yaml | grep -A 10 -B 5 envFrom
 kubectl get secrets -n platform-identity | grep identity-service
 
+## Check cluster memory usage
+docker stats zerotouch-preview-control-plane --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"
+docker stats zerotouch-preview-control-plane --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"
+
 ## AWS SSM Parameter Store
 aws ssm put-parameter --name "/zerotouch/prod/identity-service/node_env" --value "pr" --type "String" --overwrite
 aws ssm get-parameter --name "/zerotouch/prod/identity-service/neon_auth_url" --with-decryption

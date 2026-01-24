@@ -24,22 +24,55 @@ export async function validateRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.all('/internal/validate', {
     // No body schema validation - we only check headers regardless of HTTP method
   }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const requestId = request.headers['x-request-id'] || 'unknown';
+    let sessionId: string | null = null;
+    
+    // Log ALL requests to this endpoint
+    fastify.log.info({
+      requestId,
+      method: request.method,
+      url: request.url,
+      headers: Object.keys(request.headers),
+      cookieHeader: request.headers.cookie ? 'present' : 'missing',
+      authHeader: request.headers.authorization ? 'present' : 'missing'
+    }, 'extAuthz validation request received');
+    
     try {
       let validationResult;
-      let sessionId: string | null = null;
 
       // Extract authentication from Cookie or Authorization header
       const cookieHeader = request.headers.cookie;
       const authHeader = request.headers.authorization;
 
+      fastify.log.info({
+        requestId,
+        cookieHeader: cookieHeader ? `${cookieHeader.substring(0, 50)}...` : null,
+        authHeader: authHeader ? `${authHeader.substring(0, 20)}...` : null,
+        method: request.method,
+        url: request.url,
+        headers: Object.keys(request.headers)
+      }, 'extAuthz validation request received');
+
       if (cookieHeader) {
         // Session-based authentication via cookie
         sessionId = extractSessionFromCookie(cookieHeader);
+        fastify.log.info({ requestId, sessionId }, 'Extracted session ID from cookie');
+        
         if (!sessionId) {
+          fastify.log.warn({ requestId, cookieHeader }, 'Failed to extract session ID from cookie');
           return reply.status(401).send({ error: 'Invalid session cookie' });
         }
 
+        fastify.log.info({ requestId, sessionId }, 'Validating session');
         validationResult = await validationService.validateSession(sessionId);
+        fastify.log.info({ 
+          requestId, 
+          sessionId, 
+          userId: validationResult.userId,
+          orgId: validationResult.orgId,
+          role: validationResult.role 
+        }, 'Session validation successful');
+        
       } else if (authHeader) {
         // Token-based authentication via Authorization header
         const token = extractTokenFromAuthHeader(authHeader);
@@ -49,6 +82,7 @@ export async function validateRoutes(fastify: FastifyInstance): Promise<void> {
 
         validationResult = await validationService.validateApiToken(token);
       } else {
+        fastify.log.warn({ requestId }, 'No authentication provided');
         return reply.status(401).send({ error: 'No authentication provided' });
       }
 
@@ -101,15 +135,30 @@ export async function validateRoutes(fastify: FastifyInstance): Promise<void> {
         });
 
     } catch (error) {
+      const requestId = request.headers['x-request-id'] || 'unknown';
+      
       if (error instanceof ValidationError) {
+        fastify.log.warn({
+          requestId,
+          error: error.message,
+          statusCode: error.statusCode,
+          sessionId: sessionId || 'none'
+        }, 'Validation failed with ValidationError');
+        
         return reply.status(error.statusCode).send({ 
           error: error.message,
           code: 'VALIDATION_FAILED',
         });
       }
 
-      // Log unexpected errors but don't expose details
-      fastify.log.error(error, 'Validation endpoint error');
+      // Log unexpected errors with full details
+      fastify.log.error({
+        requestId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        sessionId: sessionId || 'none'
+      }, 'Validation endpoint unexpected error');
+      
       return reply.status(401).send({ 
         error: 'Authentication failed',
         code: 'AUTH_ERROR',
