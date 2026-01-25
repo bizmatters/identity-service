@@ -4,6 +4,7 @@ package-lock.json
 zerotouch-platform/
 platform/
 codebase.md
+llm-context
 
 # Build output
 dist/
