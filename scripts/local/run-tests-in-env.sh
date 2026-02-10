@@ -5,11 +5,13 @@ set -euo pipefail
 # Service Entry Point for Running Tests in Environment
 # ==============================================================================
 # Purpose: Run integration tests in existing cluster (dev/staging/prod)
-# Usage: ./scripts/local/run-tests-in-env.sh <environment>
+# Usage: ./scripts/local/run-tests-in-env.sh <environment> [test-file]
 # Example: ./scripts/local/run-tests-in-env.sh dev
+#          ./scripts/local/run-tests-in-env.sh dev tests/integration/test_neon_auth_login_flow_simple.ts
 # ==============================================================================
 
 ENVIRONMENT="${1:-dev}"
+TEST_FILE="${2:-}"
 
 # Get service name from config
 if [[ -f "ci/config.yaml" ]]; then
@@ -49,4 +51,4 @@ if [[ ! -f "$PLATFORM_SCRIPT" ]]; then
 fi
 
 chmod +x "$PLATFORM_SCRIPT"
-"$PLATFORM_SCRIPT" "$SERVICE_NAME" "$ENVIRONMENT"
+"$PLATFORM_SCRIPT" "$SERVICE_NAME" "$ENVIRONMENT" "$TEST_FILE"
