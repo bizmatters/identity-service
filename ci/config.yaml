@@ -25,7 +25,7 @@ deployment:
 dependencies:
   platform:
     - apis
-    - databases
+
   external:
     - neon-auth  # Neon Auth API calls
     - neon-db  # Neon DB API calls
