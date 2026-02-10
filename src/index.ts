@@ -67,7 +67,7 @@ fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, b
 });
 
 // Add global request logging hook
-fastify.addHook('onRequest', async (request, reply) => {
+fastify.addHook('onRequest', async (request) => {
   request.log.info({
     method: request.method,
     url: request.url,
