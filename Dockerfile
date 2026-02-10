@@ -20,14 +20,16 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dumb-init, postgresql-client, and bash for scripts
-RUN apk add --no-cache dumb-init postgresql-client bash
+# Install dumb-init, postgresql-client, bash, and yq for scripts
+RUN apk add --no-cache dumb-init postgresql-client bash && \
+    wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 && \
+    chmod +x /usr/local/bin/yq
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Copy built application, dependencies, test files, scripts, migrations, and source files
+# Copy built application, dependencies, test files, scripts, migrations, ci config, and source files
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/src ./src
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
@@ -35,6 +37,7 @@ COPY --from=builder --chown=nodejs:nodejs /app/package.json ./
 COPY --from=builder --chown=nodejs:nodejs /app/tests ./tests
 COPY --from=builder --chown=nodejs:nodejs /app/scripts ./scripts
 COPY --from=builder --chown=nodejs:nodejs /app/migrations ./migrations
+COPY --from=builder --chown=nodejs:nodejs /app/ci ./ci
 COPY --from=builder --chown=nodejs:nodejs /app/tsconfig.json ./
 COPY --from=builder --chown=nodejs:nodejs /app/vitest.config.ts ./
 COPY --from=builder --chown=nodejs:nodejs /app/vitest.integration.config.ts ./
