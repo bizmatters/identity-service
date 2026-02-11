@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Fastify from 'fastify';
 import { loginRoutes } from '../../src/routes/auth/login.js';
+import { CONFIG } from '../../src/config/index.js';
 
 describe('Neon Auth Login Flow - Core Logic Test', () => {
   let app: ReturnType<typeof Fastify>;
@@ -23,8 +24,9 @@ describe('Neon Auth Login Flow - Core Logic Test', () => {
     const mockOrgRepository = {};
 
     const loginConfig = {
-      allowedRedirectUris: ['http://localhost:3000/dashboard'],
-      defaultRedirectUri: 'http://localhost:3000/dashboard',
+      allowedRedirectUris: CONFIG.ALLOWED_REDIRECT_URIS,
+      defaultRedirectUri: CONFIG.DEFAULT_REDIRECT_URI,
+      neonAuthClientId: CONFIG.NEON_AUTH_CLIENT_ID,
     };
 
     // Register routes with mocks
@@ -77,7 +79,9 @@ describe('Neon Auth Login Flow - Core Logic Test', () => {
     });
 
     expect(response.statusCode).toBe(302);
-    expect(response.headers.location).toContain('accounts.google.com');
+    expect(response.headers.location).toContain('oauth2/auth');
+    expect(response.headers.location).toContain('client_id=');
+    expect(response.headers.location).toContain('provider=google');
   });
 
   it('should validate redirect_uri in OAuth flow', async () => {
